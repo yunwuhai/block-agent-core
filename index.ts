@@ -23,6 +23,15 @@ import { reset as resetSlots } from "./runtime/prompt-slots/engine.ts";
 import { renderCompact, renderSectioned } from "./display/mod.ts";
 import { listRunIds } from "./storage/mod.ts";
 
+/**
+ * TUI-compatible renderable text — satisfies the PI TUI Box.render contract.
+ * PI's Box.render calls child.render() on each child; this object provides that method.
+ * Functionally equivalent to `new Text(str, 0, 0)` from @earendil-works/pi-tui.
+ */
+function renderText(str: string): { render(): string } {
+  return { render: () => str };
+}
+
 export default function (pi: ExtensionAPI): void {
   pi.registerTool({
     name: "efficiency_subagent",
@@ -116,7 +125,7 @@ export default function (pi: ExtensionAPI): void {
     },
     renderCall: (params: Record<string, unknown>) => {
       const task = String(params.task ?? "?").slice(0, 60);
-      return `Efficiency Subagent: ${params.profile ?? "?"} — ${task}`;
+      return renderText(`Efficiency Subagent: ${params.profile ?? "?"} — ${task}`);
     },
     renderResult: (result: Record<string, unknown>) => {
       if (result.details && typeof result.details === "object") {
@@ -126,11 +135,11 @@ export default function (pi: ExtensionAPI): void {
           const r = results[0]!;
           const statusIcon = r.status === "completed" ? "✓" : r.status === "blocked" ? "🚫" : r.status === "failed" ? "✗" : "?";
           const exitCode = r.exitCode ?? "?";
-          return `Efficiency Subagent: ${statusIcon} ${r.status ?? "?"} (exit ${exitCode}) — ${results.length} run(s)`;
+          return renderText(`Efficiency Subagent: ${statusIcon} ${r.status ?? "?"} (exit ${exitCode}) — ${results.length} run(s)`);
         }
-        return `Efficiency Subagent: ${d.mode ?? "?"} — ${results ? results.length : 0} runs`;
+        return renderText(`Efficiency Subagent: ${d.mode ?? "?"} — ${results ? results.length : 0} runs`);
       }
-      return "Efficiency Subagent complete";
+      return renderText("Efficiency Subagent complete");
     },
   });
 }

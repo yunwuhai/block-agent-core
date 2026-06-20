@@ -57,8 +57,8 @@ describe("Efficiency Subagent extension", () => {
       },
     } as ExtensionAPI;
     extension(fakeApi);
-    const render = capturedTool?.renderCall as ((params: Record<string, unknown>) => string) | undefined;
-    const output = render!({ profile: "worker", task: "fix bugs" });
+    const render = capturedTool?.renderCall as ((params: Record<string, unknown>) => { render(): string }) | undefined;
+    const output = render!({ profile: "worker", task: "fix bugs" }).render();
     expect(output).toContain("worker");
     expect(output).toContain("fix bugs");
   });

@@ -3,7 +3,7 @@ import { runHookScripts } from "../runtime/hooks/runner.ts";
 import { injectHookOutputAsSlot } from "../runtime/hooks/slot-insertion.ts";
 import type { HookContext, HookResult } from "../runtime/hooks/types.ts";
 import { listSlots, reset } from "../runtime/prompt-slots/engine.ts";
-import { writeFileSync, unlinkSync, mkdirSync, rmSync } from "node:fs";
+import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 
 const TMP = `/tmp/hook-test-${randomUUID().slice(0, 8)}`;
