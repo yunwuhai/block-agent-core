@@ -94,4 +94,45 @@ describe("Policy evaluator", () => {
     const result = evaluate({ toolName: "anything" }, null);
     expect(result.allowed).toBe(true);
   });
+
+  it("extracts mkdir paths for policy check", () => {
+    const policy: MergedPolicy = { tools: null, paths: ["novel-writer/**"], bash: null, network: null, env: null };
+    expect(evaluate({ toolName: "bash", command: "mkdir novel-writer/test" }, policy).allowed).toBe(true);
+    expect(evaluate({ toolName: "bash", command: "mkdir /tmp/forbidden" }, policy).allowed).toBe(false);
+  });
+
+  it("extracts mv paths for policy check", () => {
+    const policy: MergedPolicy = { tools: null, paths: ["old", "new"], bash: null, network: null, env: null };
+    expect(evaluate({ toolName: "bash", command: "mv old new" }, policy).allowed).toBe(true);
+  });
+
+  it("extracts touch paths for policy check", () => {
+    const policy: MergedPolicy = { tools: null, paths: ["foo.txt"], bash: null, network: null, env: null };
+    expect(evaluate({ toolName: "bash", command: "touch foo.txt" }, policy).allowed).toBe(true);
+  });
+
+  it("extracts cp paths for policy check", () => {
+    const policy: MergedPolicy = { tools: null, paths: ["src/**", "dest/**"], bash: null, network: null, env: null };
+    expect(evaluate({ toolName: "bash", command: "cp src/file dest/" }, policy).allowed).toBe(true);
+  });
+
+  it("blocks bash path via excludePaths (deny wins)", () => {
+    const policy: MergedPolicy = { tools: null, paths: ["excluded-dir"], excludePaths: ["excluded-dir"], bash: null, network: null, env: null };
+    const result = evaluate({ toolName: "bash", command: "mkdir excluded-dir" }, policy);
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain("excludePaths");
+  });
+
+  it("skips path extraction for flag-only commands", () => {
+    const policy: MergedPolicy = { tools: null, paths: ["novel-writer/**"], bash: null, network: null, env: null };
+    expect(evaluate({ toolName: "bash", command: "echo -n" }, policy).allowed).toBe(true);
+  });
+
+  it("extracts redirect target paths", () => {
+    const allowedPolicy: MergedPolicy = { tools: null, paths: ["/tmp/**"], bash: null, network: null, env: null };
+    expect(evaluate({ toolName: "bash", command: "echo>/tmp/out.txt" }, allowedPolicy).allowed).toBe(true);
+
+    const blockedPolicy: MergedPolicy = { tools: null, paths: ["novel-writer/**"], bash: null, network: null, env: null };
+    expect(evaluate({ toolName: "bash", command: "echo>/tmp/out.txt" }, blockedPolicy).allowed).toBe(false);
+  });
 });

@@ -20,7 +20,8 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { ToolParamsSchema, type ToolParams } from "./config/mod.ts";
 import { executeRun } from "./runtime/mod.ts";
 import { reset as resetSlots } from "./runtime/prompt-slots/engine.ts";
-import { renderCompact } from "./display/mod.ts";
+import { renderCompact, renderSectioned } from "./display/mod.ts";
+import { listRunIds } from "./storage/mod.ts";
 
 export default function (pi: ExtensionAPI): void {
   pi.registerTool({
@@ -28,7 +29,7 @@ export default function (pi: ExtensionAPI): void {
     label: "Efficiency Subagent",
     description: [
       "Profile-based subagent invocation with durable sessions and policy control.",
-      "Params: profile (required), task (required), runId (optional).",
+      "Params: profile (required), task (required), runId (optional), actions (optional action sequence).",
       "Every run creates .pi/subagents/runs/<runId>/ artifacts with JSONL facts, tool logs, transcript, and handoff.",
       "Hooks run around agent/tool phases; output injected through prompt slots.",
       "Policy enforces tool names, file paths, bash commands, network, env vars, and nested subagent calls.",
@@ -39,16 +40,37 @@ export default function (pi: ExtensionAPI): void {
         profile: { type: "string", description: "Profile name to invoke" },
         task: { type: "string", description: "Task to delegate" },
         runId: { type: "string", description: "Explicit run ID for continuation or readback (optional)" },
+        actions: {
+          type: "array",
+          description: "Explicit action sequence (optional). Falls back to single read if omitted.",
+          items: {
+            type: "object",
+            properties: {
+              toolName: { type: "string", description: "Tool name: read, bash, write, edit" },
+              filePath: { type: "string", description: "File path for read/write/edit" },
+              command: { type: "string", description: "Bash command string" },
+              url: { type: "string", description: "URL for network fetch" },
+              envVar: { type: "string", description: "Environment variable name" },
+            },
+            required: ["toolName"],
+          },
+        },
       },
       required: ["profile", "task"],
     },
-    async execute(_toolCallId: string, rawParams: unknown, _signal?: AbortSignal, _onUpdate?: unknown, ctx?: ExtensionContext) {
+    async execute(_toolCallId: string, rawParams: unknown, signal?: AbortSignal, _onUpdate?: unknown, ctx?: ExtensionContext) {
       resetSlots();
 
       const parseResult = ToolParamsSchema.safeParse(rawParams);
       if (!parseResult.success) {
+        const unrecognized = parseResult.error.issues
+          .filter((i) => i.code === "unrecognized_keys")
+          .map((i) => i.keys?.join(", "));
+        const hint = unrecognized.length > 0
+          ? ` Only profile, task, runId, and actions are accepted.`
+          : "";
         return {
-          content: [{ type: "text", text: `Invalid params: ${parseResult.error.message}` }],
+          content: [{ type: "text", text: `Invalid params: ${parseResult.error.message}${hint}` }],
           isError: true,
         };
       }
@@ -57,27 +79,32 @@ export default function (pi: ExtensionAPI): void {
       const cwd = ctx?.cwd ?? process.cwd();
 
       try {
-        const result = await executeRun({
-          cwd,
-          params,
-          projectPolicy: null,
-          mergedPolicy: null,
-        });
+        const result = await executeRun({ cwd, params, signal });
 
+        const sectioned = renderSectioned(result.events);
         const summary = [
           `Efficiency Subagent: ${result.status.toUpperCase()}`,
           `Run ID: ${result.runId}`,
           `Handoff: ${result.handoffPath}`,
           "",
-          "Events:",
-          ...result.events.map((e, i) => renderCompact(e, i)),
+          sectioned,
         ].join("\n");
+
+        const exitCode = result.status === "completed" ? 0 : result.status === "blocked" ? 2 : 1;
 
         return {
           content: [{ type: "text", text: summary }],
           details: {
             mode: "single",
-            results: [{ agent: params.profile, task: params.task, exitCode: result.status === "completed" ? 0 : 1, output: result.output, runId: result.runId }],
+            results: [{
+              agent: params.profile,
+              task: params.task,
+              exitCode,
+              output: result.output,
+              runId: result.runId,
+              status: result.status,
+              events: result.events.map((e) => ({ type: e.type, label: e.label, status: e.status, detail: e.detail })),
+            }],
           },
         };
       } catch (err) {
@@ -87,11 +114,21 @@ export default function (pi: ExtensionAPI): void {
         };
       }
     },
-    renderCall: (params: Record<string, unknown>) => `Efficiency Subagent: ${params.profile ?? "?"} — ${params.task ?? "?"}`,
+    renderCall: (params: Record<string, unknown>) => {
+      const task = String(params.task ?? "?").slice(0, 60);
+      return `Efficiency Subagent: ${params.profile ?? "?"} — ${task}`;
+    },
     renderResult: (result: Record<string, unknown>) => {
       if (result.details && typeof result.details === "object") {
         const d = result.details as Record<string, unknown>;
-        return `Efficiency Subagent: ${d.mode ?? "?"} — ${d.results ? (d.results as Array<unknown>).length : 0} runs`;
+        const results = d.results as Array<Record<string, unknown>> | undefined;
+        if (results && results.length > 0) {
+          const r = results[0]!;
+          const statusIcon = r.status === "completed" ? "✓" : r.status === "blocked" ? "🚫" : r.status === "failed" ? "✗" : "?";
+          const exitCode = r.exitCode ?? "?";
+          return `Efficiency Subagent: ${statusIcon} ${r.status ?? "?"} (exit ${exitCode}) — ${results.length} run(s)`;
+        }
+        return `Efficiency Subagent: ${d.mode ?? "?"} — ${results ? results.length : 0} runs`;
       }
       return "Efficiency Subagent complete";
     },

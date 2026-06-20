@@ -1,46 +1,88 @@
-import { spawn } from "node:child_process";
+import type { HookContext, HookResult, HookSessionMessage } from "./types.ts";
 
-export interface HookResult {
-  readonly exitCode: number;
-  readonly stdout: string;
-  readonly stderr: string;
-  readonly error?: string;
+const PLUGIN_DIR = new URL("../..", import.meta.url).pathname;
+const HOOKS_DIR = `${PLUGIN_DIR}/hooks/scripts/`;
+
+const SAFE_SCRIPT_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
+
+function timeoutPromise(ms: number): Promise<HookResult> {
+  return new Promise((_resolve, reject) =>
+    setTimeout(() => reject(new Error(`Hook timed out after ${ms}ms`)), ms),
+  );
 }
 
-export async function runHookScript(
-  scriptPath: string,
-  input?: Record<string, unknown>,
+export async function runHookScripts(
+  scripts: string[],
+  ctx: HookContext,
   timeoutMs?: number,
 ): Promise<HookResult> {
-  return new Promise((resolve) => {
-    const child = spawn("bash", [scriptPath], {
-      stdio: ["pipe", "pipe", "pipe"],
-      timeout: timeoutMs ?? 30000,
-    });
+  let aggregatedSlotContent = "";
+  let lastModifiedArgs: Record<string, unknown> | null = null;
+  const aggregatedSessionMessages: HookSessionMessage[] = [];
 
-    let stdout = "";
-    let stderr = "";
-
-    child.stdout?.on("data", (chunk: Buffer) => {
-      stdout += chunk.toString();
-    });
-    child.stderr?.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
-
-    if (input) {
-      child.stdin?.write(JSON.stringify(input));
-      child.stdin?.end();
-    } else {
-      child.stdin?.end();
+  for (const scriptName of scripts) {
+    // Reject path traversal / directory separators in hook script names
+    if (!SAFE_SCRIPT_NAME_RE.test(scriptName)) {
+      return {
+        allowed: false,
+        reason: `Hook script name "${scriptName}" contains unsafe characters (only alphanumeric, hyphens, underscores allowed)`,
+        slotContent: null,
+        modifiedArgs: null,
+      };
     }
 
-    child.on("close", (code) => {
-      resolve({ exitCode: code ?? -1, stdout: stdout.trim(), stderr: stderr.trim() });
-    });
+    const scriptPath = `${HOOKS_DIR}${scriptName}.ts`;
 
-    child.on("error", (err) => {
-      resolve({ exitCode: -1, stdout, stderr, error: err.message });
-    });
-  });
+    let hookModule: { default: (ctx: HookContext) => Promise<HookResult> };
+    try {
+      hookModule = await import(scriptPath);
+    } catch {
+      continue;
+    }
+
+    if (typeof hookModule.default !== "function") {
+      continue;
+    }
+
+    try {
+      const hookPromise = hookModule.default(ctx);
+      const result = timeoutMs
+        ? await Promise.race([hookPromise, timeoutPromise(timeoutMs)])
+        : await hookPromise;
+
+      if (!result.allowed) {
+        return result;
+      }
+
+      if (result.slotContent !== null && result.slotContent !== "") {
+        aggregatedSlotContent = aggregatedSlotContent
+          ? `${aggregatedSlotContent}\n\n${result.slotContent}`
+          : result.slotContent;
+      }
+
+      if (result.modifiedArgs !== null) {
+        lastModifiedArgs = result.modifiedArgs;
+      }
+
+      if (result.sessionMessage) {
+        aggregatedSessionMessages.push(result.sessionMessage);
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        allowed: false,
+        reason: `Hook "${scriptName}" failed: ${message}`,
+        slotContent: null,
+        modifiedArgs: null,
+      };
+    }
+  }
+
+  return {
+    allowed: true,
+    reason: "all hooks passed",
+    slotContent: aggregatedSlotContent || null,
+    modifiedArgs: lastModifiedArgs,
+    ...(aggregatedSessionMessages.length > 0 ? { sessionMessage: aggregatedSessionMessages[aggregatedSessionMessages.length - 1]! } : {}),
+  };
 }

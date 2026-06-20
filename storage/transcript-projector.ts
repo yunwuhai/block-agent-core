@@ -4,19 +4,42 @@ import { readEvents } from "./event-log.ts";
 export interface TranscriptView {
   readonly runId: string;
   readonly markdown: string;
+  readonly events?: EventEntry[];
 }
 
-export async function buildTranscript(run: RunDirectory): Promise<TranscriptView> {
+export interface TranscriptOptions {
+  readonly includeJson?: boolean;
+  readonly maxOutputLength?: number;
+}
+
+export async function buildTranscript(
+  run: RunDirectory,
+  options?: TranscriptOptions,
+): Promise<TranscriptView> {
   const events = await readEvents(run);
+  const maxOutputLength = options?.maxOutputLength ?? 2000;
+  const includeJson = options?.includeJson ?? false;
+
   const lines: string[] = [
     `# Run Transcript: ${run.runId}`,
     "",
-    ...events.map(formatEvent),
+    ...events.map((e) => formatEvent(e, maxOutputLength)),
   ];
-  return { runId: run.runId, markdown: lines.join("\n") };
+
+  return {
+    runId: run.runId,
+    markdown: lines.join("\n"),
+    ...(includeJson ? { events } : {}),
+  };
 }
 
-function formatEvent(e: EventEntry): string {
+export async function buildJsonTranscript(
+  run: RunDirectory,
+): Promise<EventEntry[]> {
+  return readEvents(run);
+}
+
+function formatEvent(e: EventEntry, maxOutputLength: number): string {
   const ts = e.timestamp;
   switch (e.event) {
     case "run_start":
@@ -25,8 +48,15 @@ function formatEvent(e: EventEntry): string {
       return `## Run ${e.status ?? "ended"}\n\n- **Exit code**: ${e.exitCode ?? "?"}\n- **Time**: ${ts}`;
     case "tool_call":
       return `### Tool: \`${e.toolName ?? "?"}\`\n\n- **Arguments**: \`\`\`json\n${JSON.stringify(e.arguments ?? {}, null, 2)}\n\`\`\``;
-    case "tool_result":
-      return `### Result: \`${e.toolName ?? "?"}\`${e.isError === true ? " ❌ error" : ""}\n\n${typeof e.output === "string" ? e.output.slice(0, 2000) : "(no output)"}`;
+    case "tool_result": {
+      const sliced =
+        typeof e.output === "string"
+          ? maxOutputLength === -1
+            ? e.output
+            : e.output.slice(0, maxOutputLength)
+          : "(no output)";
+      return `### Result: \`${e.toolName ?? "?"}\`${e.isError === true ? " ❌ error" : ""}\n\n${sliced}`;
+    }
     case "hook_exec":
       return `### Hook: ${e.phase ?? "?"} (${e.script ?? "?"})\n\n- **Exit**: ${e.exitCode ?? "?"}`;
     case "policy_block":

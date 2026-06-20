@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { ToolParamsSchema, ProfileFrontmatterSchema, ProjectConfigSchema } from "../config/mod.ts";
+import { ActionSchema, ToolParamsSchema, ProfileFrontmatterSchema, ProjectPolicySchema } from "../config/mod.ts";
 
 describe("ToolParamsSchema", () => {
   it("accepts valid profile+task", () => {
@@ -12,6 +12,29 @@ describe("ToolParamsSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  it("accepts profile+task+actions array", () => {
+    const result = ToolParamsSchema.safeParse({
+      profile: "worker",
+      task: "test",
+      actions: [
+        { toolName: "mkdir", command: "mkdir dir" },
+        { toolName: "write", filePath: "dir/test.txt" },
+      ],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.actions?.length).toBe(2);
+    }
+  });
+
+  it("accepts profile+task without actions (optional)", () => {
+    const result = ToolParamsSchema.safeParse({ profile: "worker", task: "test" });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.actions).toBeUndefined();
+    }
+  });
+
   it("rejects missing profile", () => {
     const result = ToolParamsSchema.safeParse({ task: "fix bugs" });
     expect(result.success).toBe(false);
@@ -22,9 +45,12 @@ describe("ToolParamsSchema", () => {
     expect(result.success).toBe(false);
   });
 
-  it("rejects extra workflow-like keys", () => {
+  it("accepts extra keys (strips silently)", () => {
     const result = ToolParamsSchema.safeParse({ profile: "worker", task: "x", workflow: { spec: {} } });
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual({ profile: "worker", task: "x" });
+    }
   });
 });
 
@@ -38,24 +64,55 @@ describe("ProfileFrontmatterSchema", () => {
     const result = ProfileFrontmatterSchema.safeParse({
       name: "worker",
       description: "General worker",
-      model: "claude-sonnet-4-5",
       tools: ["read", "bash"],
-      hookScripts: { before_agent: "./hooks/setup.sh" },
+      hooks: {
+        before_agent: ["setup", "security-check"],
+        tools: {
+          read: { before: ["log-access"] },
+        },
+      },
     });
     expect(result.success).toBe(true);
   });
 });
 
-describe("ProjectConfigSchema", () => {
+describe("ProjectPolicySchema", () => {
   it("accepts empty config", () => {
-    const result = ProjectConfigSchema.safeParse({});
+    const result = ProjectPolicySchema.safeParse({});
     expect(result.success).toBe(true);
   });
 
-  it("accepts locked bash deny list", () => {
-    const result = ProjectConfigSchema.safeParse({
-      locked: { bash: { deny: ["rm", "sudo"] } },
+  it("accepts bash deny list", () => {
+    const result = ProjectPolicySchema.safeParse({
+      bash: { deny: ["rm", "sudo"] },
     });
     expect(result.success).toBe(true);
+  });
+});
+
+describe("ActionSchema", () => {
+  it("accepts minimal action (toolName only)", () => {
+    const result = ActionSchema.safeParse({ toolName: "read" });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts action with filePath", () => {
+    const result = ActionSchema.safeParse({ toolName: "read", filePath: "foo.txt" });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts action with command", () => {
+    const result = ActionSchema.safeParse({ toolName: "bash", command: "ls" });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects action with empty toolName", () => {
+    const result = ActionSchema.safeParse({ toolName: "" });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects action missing toolName", () => {
+    const result = ActionSchema.safeParse({ filePath: "x" });
+    expect(result.success).toBe(false);
   });
 });

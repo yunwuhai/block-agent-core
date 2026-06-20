@@ -8,10 +8,28 @@ import { evaluate } from "../policy/evaluator.ts";
 
 const TMP = "/tmp/efficiency-perm-test-" + randomUUID().slice(0, 8);
 
+function writeProfile(name: string, cwd: string) {
+  mkdirSync(`${cwd}/.profiles`, { recursive: true });
+  writeFileSync(`${cwd}/.profiles/${name}.md`, [
+    "---",
+    `name: ${name}`,
+    "description: Restricted test agent",
+    "---",
+    "You are a restricted test agent. Execute: ${task}",
+  ].join("\n"));
+}
+
+function writeProjectPolicy(cwd: string, policy: Record<string, unknown>) {
+  const configDir = `${cwd}/.pi/efficiency-subagent`;
+  mkdirSync(configDir, { recursive: true });
+  writeFileSync(`${configDir}/config.json`, JSON.stringify(policy));
+}
+
 beforeEach(() => {
   mkdirSync(TMP, { recursive: true });
   writeFileSync(`${TMP}/A.txt`, "Content of file A.");
   writeFileSync(`${TMP}/B.txt`, "Content of file B.");
+  writeProfile("restricted-agent", TMP);
 });
 
 afterEach(() => {
@@ -51,12 +69,11 @@ describe("Policy evaluator — file A allowed, file B blocked", () => {
 
 describe("Runtime — agent reads A.txt (policy allows)", () => {
   it("completes with tool_call event, no blocks", async () => {
+    writeProjectPolicy(TMP, { tools: ["read"], paths: ["A.txt", "file.txt"] });
+
     const result = await executeRun({
       cwd: TMP,
       params: { profile: "restricted-agent", task: "read A.txt" },
-      projectPolicy: { tools: ["read"], paths: ["A.txt"] },
-      mergedPolicy: null,
-      filePath: "A.txt",
     });
 
     expect(result.status).toBe("completed");
@@ -70,12 +87,11 @@ describe("Runtime — agent reads A.txt (policy allows)", () => {
 
 describe("Runtime — agent tries B.txt (policy blocks)", () => {
   it("emits a policy_block event, no tool call", async () => {
+    writeProjectPolicy(TMP, { tools: ["read"], paths: ["A.txt"] });
+
     const result = await executeRun({
       cwd: TMP,
       params: { profile: "restricted-agent", task: "try B.txt" },
-      projectPolicy: { tools: ["read"], paths: ["A.txt"] },
-      mergedPolicy: null,
-      filePath: "B.txt",
     });
 
     const blocks = result.events.filter((e) => e.status === "blocked");

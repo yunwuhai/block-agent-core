@@ -29,11 +29,18 @@ describe("Display events format", () => {
     expect(event.status).toBe("error");
   });
 
-  it("formatToolCall includes expandable args", () => {
-    const event = formatToolCall("read", { path: "src/foo.ts" });
+  it("formatToolCall includes expandable args when content exceeds threshold", () => {
+    const large = { path: "src/foo.ts", extra: "x".repeat(250) };
+    const event = formatToolCall("read", large);
     expect(event.type).toBe("tool_call");
     expect(event.expandable).toBeDefined();
     expect(event.expandable!.body).toContain("src/foo.ts");
+  });
+
+  it("formatToolCall omits expandable for small args", () => {
+    const event = formatToolCall("read", { path: "src/foo.ts" });
+    expect(event.type).toBe("tool_call");
+    expect(event.expandable).toBeUndefined();
   });
 
   it("formatToolResult truncates long output in detail", () => {
