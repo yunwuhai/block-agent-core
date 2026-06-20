@@ -1,6 +1,6 @@
 import type { HookContext, HookResult, HookSessionMessage } from "./types.ts";
 
-const PLUGIN_DIR = new URL("../..", import.meta.url).pathname;
+const PLUGIN_DIR = new URL("../../..", import.meta.url).pathname;
 const HOOKS_DIR = `${PLUGIN_DIR}/hooks/scripts/`;
 
 const SAFE_SCRIPT_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;

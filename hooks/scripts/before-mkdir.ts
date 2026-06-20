@@ -1,28 +1,21 @@
-import type { HookContext, HookResult } from "../../runtime/hooks/types.ts";
+// before-mkdir hook — runs ls before bash/mkdir operations
+// Self-contained: no external type imports to avoid TypeScript resolution issues in dynamic import
 
-async function runLs(dir: string): Promise<string> {
-  const proc = Bun.spawn(["ls", "-la", dir], { stdout: "pipe", stderr: "pipe" });
-  const output = await new Response(proc.stdout).text();
-  const exitCode = await proc.exited;
-  if (exitCode !== 0) {
-    const errOutput = await new Response(proc.stderr).text();
-    return `[ls 失败 (exit ${exitCode})] ${errOutput.trim()}`;
-  }
-  return output.trim();
-}
+import { spawnSync } from "node:child_process";
 
-export default async function (ctx: HookContext): Promise<HookResult> {
-  const targetDir = ctx.cwd;
-
-  let lsOutput: string;
-  try {
-    lsOutput = await runLs(targetDir);
-  } catch (err) {
-    lsOutput = `[无法执行 ls 命令: ${err instanceof Error ? err.message : String(err)}]`;
-  }
-
-  const header = "=== mkdir 执行前 - 当前目录结构 ===";
-  const content = `${header}\n${lsOutput}`;
+export default async function (ctx: { cwd: string }): Promise<{
+  allowed: boolean;
+  reason: string;
+  slotContent: string | null;
+  modifiedArgs: Record<string, unknown> | null;
+  sessionMessage?: { role: string; content: string };
+}> {
+  const proc = spawnSync("ls", ["-la", ctx.cwd], { timeout: 5000 });
+  const lsOutput = proc.error
+    ? `[ls 失败] ${proc.error.message}`
+    : proc.status !== 0
+      ? `[ls 失败 (exit ${proc.status})] ${proc.stderr?.toString().trim()}`
+      : proc.stdout?.toString().trim() || "";
 
   return {
     allowed: true,
@@ -31,7 +24,7 @@ export default async function (ctx: HookContext): Promise<HookResult> {
     modifiedArgs: null,
     sessionMessage: {
       role: "user",
-      content,
+      content: `=== mkdir 执行前 - 当前目录结构 ===\n${lsOutput}`,
     },
   };
 }
