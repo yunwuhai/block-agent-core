@@ -1,6 +1,6 @@
 # L2 Module: Runtime Core
 
-**Purpose:** Operation-layer execution lifecycle for subagent runs. Ties together profile loading, policy enforcement, prompt rendering, tool simulation, session persistence, transcript generation, and structured handoff output.
+**Purpose:** Operation-layer execution lifecycle for subagent runs. Ties together profile loading, policy enforcement, prompt rendering, tool simulation, durable event/session persistence, transcript generation, and structured handoff output.
 
 ## Member Files
 
@@ -38,3 +38,4 @@ index.ts
 
 - Lifecycle script dispatch was removed from this module. Action execution is now controlled by explicit `actions` params and policy evaluation.
 - Prompt/context loading is handled by registry and placeholder frontmatter, not lifecycle scripts.
+- Frontend display events were removed; runtime status is represented by durable JSONL events plus generated transcript/handoff artifacts.

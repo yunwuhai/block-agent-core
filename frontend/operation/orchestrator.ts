@@ -3,15 +3,6 @@ import { join, resolve } from "node:path";
 import type { ActionParams, ProfileDefinition, ToolParams } from "../../backend/input/mod.ts";
 import { loadProfile } from "../../backend/input/profile-loader.ts";
 import { loadProjectPolicy } from "../../backend/input/project-loader.ts";
-import type { DisplayEvent } from "../display/mod.ts";
-import {
-  createEvent,
-  formatHandoff,
-  formatPolicyBlock,
-  formatRunEnd,
-  formatRunStart,
-} from "../display/mod.ts";
-import { isoNow } from "../display/iso-now.ts";
 import { toPolicyEntry } from "../../backend/computation/policy/mod.ts";
 import type { MergedPolicy, PolicyEntry } from "../../backend/computation/policy/mod.ts";
 import { mergePolicies } from "../../backend/computation/policy/merge.ts";
@@ -58,9 +49,9 @@ export interface RunResult {
   readonly status: "completed" | "failed" | "blocked";
   readonly handoffPath: string;
   readonly runDir: RunDirectory;
-  readonly events: readonly DisplayEvent[];
   readonly output: string;
   readonly transcript?: string;
+  readonly transcriptPath?: string;
 }
 
 type RunStatus = RunResult["status"];
@@ -80,7 +71,6 @@ interface ActionLoopInput {
   readonly run: RunDirectory;
   readonly runId: string;
   readonly policy: MergedPolicy;
-  readonly events: DisplayEvent[];
   readonly actions: readonly ActionContext[];
   readonly signal: AbortSignal;
 }
@@ -104,7 +94,6 @@ async function executeRunWithSignal(
   ctx: RunContext,
   effectiveSignal: AbortSignal,
 ): Promise<RunResult> {
-  const events: DisplayEvent[] = [];
   let status: RunStatus = "completed";
   const identity = await resolveRunIdentity(ctx);
   const run = await createRunDir(ctx.cwd, identity.runId, ctx.params.profile, ctx.params.task);
@@ -112,8 +101,8 @@ async function executeRunWithSignal(
 
   await writeRunningSessionState(run, identity.runId, ctx.params);
   await appendRunCreatedEvent(run, identity);
-  await recordProfileMismatch(ctx, run, identity, events);
-  await restoreSlotsOnContinuation(run, identity.isContinuation, events);
+  await recordProfileMismatch(ctx, run, identity);
+  await restoreSlotsOnContinuation(run, identity.isContinuation);
 
   const profile = await loadRunProfile(ctx);
   assertRunNotAborted(effectiveSignal, "Run aborted after profile load");
@@ -125,9 +114,7 @@ async function executeRunWithSignal(
 
   const registryRunCtx: RegistryRunContext = { runId: identity.runId, roundNumber: 0, cwd: ctx.cwd };
   const fullPrompt = await renderPromptWithRegistry(profile.prompt, registryRunCtx);
-  events.push(formatRunStart(ctx.params.profile, ctx.params.task));
   await appendRunStartEvent(run, identity.runId, ctx.params);
-  await recordContinuationContext(run, identity.isContinuation, events);
   await appendSession(run, {
     timestamp: isoNow(),
     runId: identity.runId,
@@ -140,20 +127,17 @@ async function executeRunWithSignal(
     run,
     runId: identity.runId,
     policy,
-    events,
     actions: buildActionContexts(ctx.params.actions),
     signal: effectiveSignal,
   });
 
-  const artifacts = await createArtifacts(ctx, run, identity, events, status);
-  pushArtifactEvents(events, artifacts);
-  events.push(formatRunEnd(status === "completed"));
+  const artifacts = await createArtifacts(ctx, run, identity, status);
   await appendRunEndEvent(run, identity.runId, status);
   await writeFinalSessionState(run, identity.runId, ctx.params, status);
   await persistSlots(run);
   await persistRegistry(registryStorage);
 
-  return buildRunResult(run, identity.runId, status, artifacts, events);
+  return buildRunResult(run, identity.runId, status, artifacts);
 }
 
 function createRunTiming(ctx: RunContext): RunTiming {
@@ -222,19 +206,12 @@ async function recordProfileMismatch(
   ctx: RunContext,
   run: RunDirectory,
   identity: RunIdentity,
-  events: DisplayEvent[],
 ): Promise<void> {
   const requestedRunId = ctx.params.runId;
   if (!identity.isContinuation || !requestedRunId) return;
 
   const originalProfile = await readRunProfile(ctx.cwd, requestedRunId);
   if (originalProfile && originalProfile !== ctx.params.profile) {
-    events.push(createEvent({
-      type: "policy",
-      label: "Profile mismatch",
-      detail: `Continuing run originally created with profile "${originalProfile}" using profile "${ctx.params.profile}". Tools and permissions may differ.`,
-      status: "blocked",
-    }));
     await appendEvent(run, {
       timestamp: isoNow(),
       runId: identity.runId,
@@ -248,7 +225,6 @@ async function recordProfileMismatch(
 async function restoreSlotsOnContinuation(
   run: RunDirectory,
   isContinuation: boolean,
-  events: DisplayEvent[],
 ): Promise<void> {
   if (!isContinuation) return;
 
@@ -257,7 +233,6 @@ async function restoreSlotsOnContinuation(
     const raw = await readFile(slotsPath, "utf-8");
     const data = JSON.parse(raw) as SerializedSlots;
     deserializeSlots(data);
-    events.push(createEvent({ type: "slot", label: "Slots restored", detail: `${Object.keys(data.slots).length} slot(s) from disk`, status: "ok" }));
   } catch (err) {
     stringifyUnknownError(err);
   }
@@ -349,28 +324,6 @@ async function appendRunStartEvent(
   });
 }
 
-async function recordContinuationContext(
-  run: RunDirectory,
-  isContinuation: boolean,
-  events: DisplayEvent[],
-): Promise<void> {
-  if (!isContinuation) return;
-
-  try {
-    const priorEvents = await readEvents(run);
-    if (priorEvents.length > 0) {
-      events.push(createEvent({
-        type: "run_start",
-        label: "Continuation context loaded",
-        detail: `${priorEvents.length} prior events`,
-        status: "ok",
-      }));
-    }
-  } catch (err) {
-    stringifyUnknownError(err);
-  }
-}
-
 function buildActionContexts(actions: readonly ActionParams[] | undefined): ActionContext[] {
   return actions && actions.length > 0
     ? actions.map(toActionContext)
@@ -402,7 +355,6 @@ async function executeActionLoop(input: ActionLoopInput): Promise<RunStatus> {
         input.run,
         input.runId,
         input.policy,
-        input.events,
         actionCtx,
         input.signal,
       );
@@ -440,7 +392,6 @@ async function createArtifacts(
   ctx: RunContext,
   run: RunDirectory,
   identity: RunIdentity,
-  events: readonly DisplayEvent[],
   status: RunStatus,
 ): Promise<GenerateRunArtifactsResult> {
   const accomplished = [`Loaded profile "${ctx.params.profile}"`];
@@ -448,6 +399,7 @@ async function createArtifacts(
     accomplished.push("Resumed prior session");
   }
   accomplished.push("Executed configured action sequence");
+  const eventCount = (await readEvents(run)).length + 1;
 
   return generateRunArtifacts(run, {
     runId: identity.runId,
@@ -456,25 +408,11 @@ async function createArtifacts(
     status,
     exitCode: status === "completed" ? 0 : 1,
     isContinuation: identity.isContinuation,
-    eventCount: events.length + 1,
+    eventCount,
     accomplished,
     includeToolAccomplishments: true,
     pending: status === "blocked" ? ["Resolve policy block and retry"] : [],
-    ...(events[0]?.timestamp !== undefined ? { startedAt: events[0].timestamp } : {}),
   });
-}
-
-function pushArtifactEvents(
-  events: DisplayEvent[],
-  artifacts: GenerateRunArtifactsResult,
-): void {
-  if (artifacts.transcriptPath !== undefined) {
-    events.push(createEvent({ type: "handoff", label: "Transcript saved", detail: artifacts.transcriptPath, status: "ok" }));
-  }
-  if (artifacts.transcriptError !== undefined) {
-    events.push(formatPolicyBlock(`Transcript build failed: ${artifacts.transcriptError}`));
-  }
-  events.push(formatHandoff(artifacts.handoffPath));
 }
 
 async function appendRunEndEvent(
@@ -529,7 +467,6 @@ function buildRunResult(
   runId: string,
   status: RunStatus,
   artifacts: GenerateRunArtifactsResult,
-  events: readonly DisplayEvent[],
 ): RunResult {
   const output = status === "completed"
     ? "Run completed."
@@ -542,9 +479,9 @@ function buildRunResult(
     status,
     handoffPath: artifacts.handoffPath,
     runDir: run,
-    events,
     output,
     ...(artifacts.transcriptMarkdown !== undefined ? { transcript: artifacts.transcriptMarkdown } : {}),
+    ...(artifacts.transcriptPath !== undefined ? { transcriptPath: artifacts.transcriptPath } : {}),
   };
 }
 
@@ -556,4 +493,8 @@ function assertRunNotAborted(signal: AbortSignal, message: string): void {
 
 function stringifyUnknownError(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function isoNow(): string {
+  return new Date().toISOString();
 }

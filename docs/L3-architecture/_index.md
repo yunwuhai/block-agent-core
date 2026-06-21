@@ -9,7 +9,6 @@ This project is organized around two current capabilities:
 
 ```
 FRONTEND
-├── Display: display-tui
 └── Operation: root-entry, runtime-core
 
 BACKEND
@@ -46,7 +45,6 @@ prompt-engine
 
 | Layer | Count | Modules |
 |---|---:|---|
-| Frontend Display | 1 | `display-tui` |
 | Frontend Operation | 2 | `runtime-core`, `root-entry` |
 | Backend Input | 3 | `configuration`, `profile-management`, `project-policy` |
 | Backend Computation | 5 | `registry-types`, `registry-engine`, `registry-composer`, `prompt-engine`, `policy-engine` |
@@ -55,4 +53,4 @@ prompt-engine
 
 ## Removed Boundary
 
-Lifecycle scripts are no longer part of this architecture. Tool behavior is controlled by explicit actions plus policy evaluation. Context injection is controlled by profile placeholders, dynamic slots, and registry scheduling.
+Lifecycle scripts and frontend display rendering are no longer part of this architecture. Tool behavior is controlled by explicit actions plus policy evaluation. Context injection is controlled by profile placeholders, dynamic slots, and registry scheduling. User-visible run history comes from durable logs, transcript, and handoff artifacts.

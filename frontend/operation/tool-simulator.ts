@@ -1,12 +1,3 @@
-import type { DisplayEvent } from "../display/mod.ts";
-import {
-  createEvent,
-  formatPolicyBlock,
-  formatSlotChange,
-  formatToolCall,
-  formatToolResult,
-} from "../display/mod.ts";
-import { isoNow } from "../display/iso-now.ts";
 import { evaluate } from "../../backend/computation/policy/evaluator.ts";
 import type { ActionContext } from "../../backend/computation/policy/evaluator.ts";
 import type { MergedPolicy } from "../../backend/computation/policy/mod.ts";
@@ -23,7 +14,6 @@ export async function executeWithRetry(
   run: RunDirectory,
   runId: string,
   policy: MergedPolicy | null,
-  events: DisplayEvent[],
   actionCtx: ActionContext,
   signal?: AbortSignal,
 ): Promise<ToolInteractionResult> {
@@ -38,19 +28,13 @@ export async function executeWithRetry(
 
     try {
       if (attempt > 0) {
-        events.push(createEvent({
-          type: "run_start",
-          label: `Retry attempt ${attempt}/${MAX_RETRIES}`,
-          detail: `Previous attempt failed: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
-          status: "running",
-        }));
         await new Promise<void>((resolve) => {
           setTimeout(resolve, RETRY_DELAY_MS * Math.pow(2, attempt - 1));
         });
       }
 
       return await simulateToolInteraction(
-        run, runId, policy, events, actionCtx, signal,
+        run, runId, policy, actionCtx, signal,
       );
     } catch (err) {
       lastError = err;
@@ -75,7 +59,6 @@ export async function simulateToolInteraction(
   run: RunDirectory,
   runId: string,
   policy: MergedPolicy | null,
-  events: DisplayEvent[],
   actionCtx: ActionContext,
   signal?: AbortSignal,
 ): Promise<ToolInteractionResult> {
@@ -85,7 +68,6 @@ export async function simulateToolInteraction(
 
   const decision = evaluate(actionCtx, policy);
   if (!decision.allowed) {
-    events.push(formatPolicyBlock(decision.reason));
     await appendEvent(run, {
       timestamp: isoNow(),
       runId,
@@ -101,7 +83,6 @@ export async function simulateToolInteraction(
   if (actionCtx.command) toolArgs.command = actionCtx.command;
   if (actionCtx.url) toolArgs.url = actionCtx.url;
 
-  events.push(formatToolCall(actionCtx.toolName, toolArgs));
   const callEntry = {
     timestamp: isoNow(),
     runId,
@@ -114,7 +95,6 @@ export async function simulateToolInteraction(
 
   const output = `[simulated ${actionCtx.toolName} output]`;
   const isError = false;
-  events.push(formatToolResult(actionCtx.toolName, output, isError));
   const resultEntry = {
     timestamp: isoNow(),
     runId,
@@ -149,8 +129,11 @@ export async function simulateToolInteraction(
       operation: change.operation,
       slotName: change.slotName,
     });
-    events.push(formatSlotChange(change.slotName, change.operation));
   }
 
   return { output, blocked: false };
+}
+
+function isoNow(): string {
+  return new Date().toISOString();
 }

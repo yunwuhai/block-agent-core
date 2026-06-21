@@ -2,7 +2,7 @@
 
 Functional module decomposition based on coupling analysis of `config/` and `storage/` L1 file documentation. Each module groups files that share types, call each other, and serve a common purpose.
 
-> **Step 4 Update (2026-06-21):** No new modules were created by the runtime-core split — the reorganization was fully deferred. All 16 L2 modules remain unchanged. The `runtime-core` boundary violation documented in [L3/_bugs.md](../L3-architecture/_bugs.md) is still active.
+> **Step 4 Update (2026-06-21):** No new modules were created by the runtime-core split — the reorganization was fully deferred. Frontend display was later removed for redesign, leaving 13 active L2 modules. The `runtime-core` boundary violation documented in [L3/_bugs.md](../L3-architecture/_bugs.md) is still active.
 
 ## Modules
 

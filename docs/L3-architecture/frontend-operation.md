@@ -7,7 +7,7 @@ The operation layer is the execution control surface. It receives tool invocatio
 | # | Module | Primary | Secondary | Description | L2 Doc |
 |---|--------|---------|-----------|-------------|--------|
 | 1 | `runtime-core` | 操作 | 输入, 计算, 存储, 输出 | Coordinates the run lifecycle and action loop. | [runtime-core.md](../L2-modules/runtime-core.md) |
-| 2 | `root-entry` | 操作 | 显示 | Registers the `efficiency_subagent` PI extension tool and dispatches to `executeRun()`. | [root-entry.md](../L2-modules/root-entry.md) |
+| 2 | `root-entry` | 操作 | — | Registers the `efficiency_subagent` PI extension tool and dispatches to `executeRun()`. | [root-entry.md](../L2-modules/root-entry.md) |
 
 ## Runtime Lifecycle
 
@@ -25,4 +25,4 @@ The operation layer is the execution control surface. It receives tool invocatio
 
 ## Boundary
 
-The operation layer does not run lifecycle extension scripts. Every operation is an explicit action evaluated by the policy engine, then recorded into durable run artifacts.
+The operation layer does not run lifecycle extension scripts or frontend display rendering. Every operation is an explicit action evaluated by the policy engine, then recorded into durable run artifacts.

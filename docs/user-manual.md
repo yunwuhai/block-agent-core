@@ -12,16 +12,16 @@ The efficiency-subagent is a profile-based subagent plugin for the PI Coding Age
 
 ## Architecture Overview
 
-The system has 16 functional modules arranged in two layers (Frontend and Backend), with the Backend split into four quadrants:
+The system has 13 functional modules arranged in two layers (Frontend and Backend), with the Backend split into four quadrants:
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │  FRONTEND (user-facing)                                       │
-│  ┌─────────────────────┐  ┌────────────────────────────────┐ │
-│  │ Display (显示)        │  │ Operation (操作)                │ │
-│  │ display-tui          │  │ root-entry (tool registration) │ │
-│  │ (ANSI event render)  │  │ runtime-core (action loop)     │ │
-│  └─────────────────────┘  └────────────────────────────────┘ │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │ Operation (操作)                                      │  │
+│  │ root-entry (tool registration), runtime-core           │  │
+│  │ action loop and durable artifact coordination          │  │
+│  └────────────────────────────────────────────────────────┘  │
 ├──────────────────────────────────────────────────────────────┤
 │  BACKEND (data processing)                                    │
 │  ┌──────────────┐ ┌──────────────┐ ┌────────┐ ┌────────────┐│
@@ -34,8 +34,6 @@ The system has 16 functional modules arranged in two layers (Frontend and Backen
 │  └──────────────┘ └──────────────┘ └────────┘ └────────────┘│
 └──────────────────────────────────────────────────────────────┘
 ```
-
-**Frontend Display** formats ANSI-styled terminal output from structured events. It has no business logic.
 
 **Frontend Operation** handles tool registration (root-entry) and the 17-phase execution lifecycle (runtime-core). The runtime-core orchestrator is the central hub, but it crosses into backend quadrants, which is a documented architectural concern.
 
@@ -55,7 +53,7 @@ The primary execution path runs top-down:
 User invokes tool → root-entry validates params → profile/project config loaded
 → policy merged → prompt built (registry + slots + placeholders)
 → action loop (per-action: policy check → simulated tool)
-→ transcript built → handoff written → storage persisted → TUI rendered
+→ transcript built → handoff written → storage persisted
 ```
 
 ---
@@ -114,12 +112,8 @@ If you omit `runId`, a new run directory is created at `.pi/subagents/runs/{prof
 **When to interact:** If you're tracing the execution lifecycle, adding new lifecycle phases, or debugging why a run failed. Key export: `executeRun(ctx)`.
 
 ### Root Entry (`index.ts`)
-**What it does:** Extension entry point. Registers the `efficiency_subagent` tool on the host's `ExtensionAPI`, validates parameters, resets slots, dispatches to `executeRun()`, and renders TUI results via `renderSectioned()`.
+**What it does:** Extension entry point. Registers the `efficiency_subagent` tool on the host's `ExtensionAPI`, validates parameters, resets slots, dispatches to `executeRun()`, and returns a compact summary plus structured run details.
 **When to interact:** If you're changing the tool interface or adding new extension-level behaviors.
-
-### Display TUI (`display/`)
-**What it does:** Formats lifecycle events as ANSI-styled terminal output. Defines `DisplayEvent` with 10 factory functions and two renderers: compact (single-line with status icons) and sectioned (multi-line grouped by phase).
-**When to interact:** If you're adding new event types or changing how output looks in the terminal.
 
 ---
 

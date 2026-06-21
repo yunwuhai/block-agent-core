@@ -15,9 +15,8 @@ Current classification of L2 modules by primary architectural purpose.
 | 9 | `registry-composer` | 计算 | 输出 | [registry-composer.md](../L2-modules/registry-composer.md) |
 | 10 | `prompt-engine` | 计算 | — | [prompt-engine.md](../L2-modules/prompt-engine.md) |
 | 11 | `policy-engine` | 计算 | — | [policy-engine.md](../L2-modules/policy-engine.md) |
-| 12 | `display-tui` | 显示 | — | [display-tui.md](../L2-modules/display-tui.md) |
-| 13 | `runtime-core` | 操作 | 输入, 计算, 存储, 输出 | [runtime-core.md](../L2-modules/runtime-core.md) |
-| 14 | `root-entry` | 操作 | 显示 | [root-entry.md](../L2-modules/root-entry.md) |
+| 12 | `runtime-core` | 操作 | 输入, 计算, 存储, 输出 | [runtime-core.md](../L2-modules/runtime-core.md) |
+| 13 | `root-entry` | 操作 | — | [root-entry.md](../L2-modules/root-entry.md) |
 
 ## Classification Notes
 
@@ -26,4 +25,4 @@ Current classification of L2 modules by primary architectural purpose.
 - Storage modules own persisted JSONL and indexed registry data.
 - Output modules format durable artifacts.
 - Operation modules coordinate user-facing execution flow.
-- Display modules format terminal output.
+- Display modules are currently absent; terminal display is intentionally deferred for redesign.

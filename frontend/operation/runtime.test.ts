@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { reset } from "../../backend/computation/prompt/engine.ts";
+import { readEvents } from "../../backend/storage/mod.ts";
 import { executeRun } from "./mod.ts";
 
 const TMP = "/tmp/efficiency-subagent-test-" + randomUUID().slice(0, 8);
@@ -33,9 +34,10 @@ describe("Runtime runner", () => {
     expect(result.status).toBe("completed");
     expect(result.runId).toBeTruthy();
     expect(result.handoffPath).toContain("handoff.md");
-    expect(result.events.length).toBeGreaterThan(0);
 
-    const runStartEvents = result.events.filter((e) => e.type === "run_start");
+    const events = await readEvents(result.runDir);
+    expect(events.length).toBeGreaterThan(0);
+    const runStartEvents = events.filter((e) => e.event === "run_start");
     expect(runStartEvents.length).toBe(1);
   });
 
@@ -53,7 +55,8 @@ describe("Runtime runner", () => {
       params: { profile: "test-profile", task: "try dangerous" },
     });
 
-    const blocked = result.events.filter((e) => e.status === "blocked");
+    const events = await readEvents(result.runDir);
+    const blocked = events.filter((e) => e.event === "policy_block");
     expect(blocked.length).toBeGreaterThan(0);
   });
 
@@ -72,7 +75,8 @@ describe("Runtime runner", () => {
 
     expect(result.status).toBe("completed");
     expect(result.runId).toBeTruthy();
-    const toolCalls = result.events.filter((e) => e.type === "tool_call");
+    const events = await readEvents(result.runDir);
+    const toolCalls = events.filter((e) => e.event === "tool_call");
     expect(toolCalls.length).toBe(2);
   });
 

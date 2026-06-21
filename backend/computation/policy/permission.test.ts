@@ -5,6 +5,7 @@ import { evaluate } from "./evaluator.ts";
 import { mergePolicies } from "./merge.ts";
 import { reset } from "../prompt/engine.ts";
 import { executeRun } from "../../../frontend/operation/mod.ts";
+import { readEvents } from "../../storage/mod.ts";
 
 const TMP = "/tmp/efficiency-perm-test-" + randomUUID().slice(0, 8);
 
@@ -77,11 +78,12 @@ describe("Runtime — agent reads A.txt (policy allows)", () => {
     });
 
     expect(result.status).toBe("completed");
-    const blocks = result.events.filter((e) => e.status === "blocked");
+    const events = await readEvents(result.runDir);
+    const blocks = events.filter((e) => e.event === "policy_block");
     expect(blocks.length).toBe(0);
-    const toolCalls = result.events.filter((e) => e.type === "tool_call");
+    const toolCalls = events.filter((e) => e.event === "tool_call");
     expect(toolCalls.length).toBe(1);
-    expect(toolCalls[0]?.label).toContain("read");
+    expect(toolCalls[0]?.toolName).toContain("read");
   });
 });
 
@@ -94,12 +96,12 @@ describe("Runtime — agent tries B.txt (policy blocks)", () => {
       params: { profile: "restricted-agent", task: "try B.txt" },
     });
 
-    const blocks = result.events.filter((e) => e.status === "blocked");
+    const events = await readEvents(result.runDir);
+    const blocks = events.filter((e) => e.event === "policy_block");
     expect(blocks.length).toBe(1);
-    expect(blocks[0]?.type).toBe("policy");
-    expect(blocks[0]?.detail).toContain("not allowed");
+    expect(blocks[0]?.reason).toContain("not allowed");
 
-    const toolCalls = result.events.filter((e) => e.type === "tool_call");
+    const toolCalls = events.filter((e) => e.event === "tool_call");
     expect(toolCalls.length).toBe(0);
   });
 });

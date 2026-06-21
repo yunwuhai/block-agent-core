@@ -10,28 +10,27 @@
 
 | 层级 | 位置 | 内容 |
 |------|------|------|
-| L1 文件级 | `docs/L1-files/` (44个) | 每个文件的作用、每个导出符号的简介+行号 |
-| L2 模块级 | `docs/L2-modules/` (20个) | 16个功能模块的耦合分析、数据流图、依赖关系 |
-| L3 架构级 | `docs/L3-architecture/` (10个) | 前端(显示+操作) vs 后端(输入+输出+存储+计算)分类 |
+| L1 文件级 | `docs/L1-files/` | 每个文件的作用、每个导出符号的简介+行号 |
+| L2 模块级 | `docs/L2-modules/` | 功能模块的耦合分析、数据流图、依赖关系 |
+| L3 架构级 | `docs/L3-architecture/` | 前端(操作) vs 后端(输入+输出+存储+计算)分类 |
 | 用户手册 | `docs/user-manual.md` | 给 LLM 看的项目使用指南 |
 | 冗余审计 | `docs/audit-redundancy.md` | 已发现并处理的冗余项 |
 
 ## 开发命令
 
 ```bash
-bun test          # 运行全部测试（当前 155 pass / 0 fail），测试与源文件同目录
+bun test          # 运行全部测试（当前 132 pass / 0 fail），测试与源文件同目录
 tsc --noEmit      # 类型检查
 ```
 
 ## 架构速览
 
 ```
-frontend/display/     — TUI 事件渲染（显示层）
 frontend/operation/   — 编排器 + 工具模拟器（操作层）
 backend/input/        — Zod schema + profile 加载（输入层）
 backend/output/       — handoff + transcript 生成（输出层）
 backend/storage/      — 运行目录 + JSONL 持久化（存储层）
-backend/computation/  — policy/prompt/hooks/registry/scripts（计算层）
+backend/computation/  — policy/prompt/registry（计算层）
 index.ts              — PI 扩展入口
 ```
 

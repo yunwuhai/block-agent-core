@@ -9,7 +9,6 @@
 efficiency-subagent/
 ├── index.ts
 ├── frontend/
-│   ├── display/
 │   └── operation/
 ├── backend/
 │   ├── input/
@@ -27,4 +26,4 @@ efficiency-subagent/
 - `index.ts` remains the PI extension entry point.
 - Runtime orchestration lives in `frontend/operation/`.
 - Input, computation, storage, and output modules live under `backend/`.
-- Lifecycle extension scripts were removed after this reorganization; current control flow uses explicit actions, policy evaluation, prompt registry scheduling, and durable run artifacts.
+- Lifecycle extension scripts and frontend display rendering were removed after this reorganization; current control flow uses explicit actions, policy evaluation, prompt registry scheduling, and durable run artifacts.

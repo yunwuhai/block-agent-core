@@ -2,15 +2,15 @@
 
 **Purpose:** Top-level run lifecycle orchestrator for efficiency-subagent. Drives run identity resolution, run directory creation, session persistence, profile loading, policy merge, prompt rendering via registry/slots, per-action execution, transcript/handoff generation, and slot/registry persistence.
 
-**Lines:** 548
+**Lines:** 500
 
 ## Exports
 
 | Export | Kind | Lines | Description |
 |---|---|---|---|
-| `RunContext` | interface | 49–54 | Input parameters: `cwd`, `params` (`ToolParams`), optional `signal`, optional `timeoutMs`. |
-| `RunResult` | interface | 56–64 | Return shape: `runId`, `status`, `handoffPath`, `runDir`, `events`, `output`, optional `transcript`. |
-| `executeRun` | async function | 88–101 | Primary entry point. Creates timeout/signal wrapper, delegates to `executeRunWithSignal()`, clears timeout in `finally`. |
+| `RunContext` | interface | 40–45 | Input parameters: `cwd`, `params` (`ToolParams`), optional `signal`, optional `timeoutMs`. |
+| `RunResult` | interface | 47–55 | Return shape: `runId`, `status`, `handoffPath`, `runDir`, `output`, optional `transcript`, optional `transcriptPath`. |
+| `executeRun` | async function | 78–91 | Primary entry point. Creates timeout/signal wrapper, delegates to `executeRunWithSignal()`, clears timeout in `finally`. |
 
 ## Lifecycle
 
@@ -29,30 +29,29 @@
 
 | Function | Lines | Description |
 |---|---|---|
-| `executeRunWithSignal(ctx, signal)` | 103–157 | Core orchestration logic. |
-| `createRunTiming(ctx)` | 159–178 | Builds timeout-backed `AbortController` and merges caller signal. |
-| `resolveRunIdentity(ctx)` | 180–186 | Resolves base run id, continuation status, and concrete run id. |
-| `initializeRegistry(cwd, run)` | 188–196 | Loads `registry.jsonl`, wires `ScheduleOrchestrator`, sets prompt registry globals. |
-| `writeRunningSessionState(run, runId, params)` | 198–210 | Writes initial `session.json`. |
-| `appendRunCreatedEvent(run, identity)` | 212–219 | Logs `run_created` or `run_continue`. |
-| `recordProfileMismatch(ctx, run, identity, events)` | 221–246 | Emits mismatch warning on continuation with a different profile. |
-| `restoreSlotsOnContinuation(run, isContinuation, events)` | 248–264 | Restores `slots.json` when continuing. |
-| `loadRunProfile(ctx)` | 266–273 | Loads `.profiles/{profile}.md` and wraps errors with profile name. |
-| `loadMergedPolicy(ctx, profile)` | 275–286 | Loads project policy and merges profile `tools` allowlist. |
-| `registerProfilePlaceholders(cwd, profile)` | 288–294 | Registers frontmatter placeholders. |
-| `registerProfileRegistryEntries(cwd, profile, registryStorage)` | 296–325 | Registers frontmatter registry entries with normalized lifecycle/frequency. |
-| `normalizeFrequency(frequency)` | 327–336 | Removes undefined frequency keys before registry registration. |
-| `appendRunStartEvent(run, runId, params)` | 338–350 | Logs `run_start`. |
-| `recordContinuationContext(run, isContinuation, events)` | 338–358 | Adds display context for prior events. |
-| `buildActionContexts(actions)` | 360–364 | Converts params actions to policy action contexts; defaults to one read. |
-| `toActionContext(action)` | 366–373 | Maps optional action fields to `ActionContext`. |
-| `executeActionLoop(input)` | 375–423 | Executes each action and appends assistant messages. |
-| `createArtifacts(ctx, run, identity, events, status)` | 425–451 | Delegates to `generateRunArtifacts()`. |
-| `pushArtifactEvents(events, artifacts)` | 453–464 | Adds transcript/handoff display events. |
-| `appendRunEndEvent(run, runId, status)` | 466–478 | Logs `run_end`. |
-| `writeFinalSessionState(run, runId, params, status)` | 480–494 | Writes final `session.json`. |
-| `persistSlots(run)` | 496–503 | Writes `slots.json`. |
-| `persistRegistry(registryStorage)` | 505–511 | Saves `registry.jsonl`. |
-| `buildRunResult(run, runId, status, artifacts, events)` | 513–535 | Assembles `RunResult`. |
-| `assertRunNotAborted(signal, message)` | 537–541 | Throws if signal is aborted. |
-| `stringifyUnknownError(err)` | 543–545 | Converts unknown errors to strings. |
+| `executeRunWithSignal(ctx, signal)` | 93–141 | Core orchestration logic. |
+| `createRunTiming(ctx)` | 143–162 | Builds timeout-backed `AbortController` and merges caller signal. |
+| `resolveRunIdentity(ctx)` | 164–169 | Resolves base run id, continuation status, and concrete run id. |
+| `initializeRegistry(cwd, run)` | 172–180 | Loads `registry.jsonl`, wires `ScheduleOrchestrator`, sets prompt registry globals. |
+| `writeRunningSessionState(run, runId, params)` | 182–194 | Writes initial `session.json`. |
+| `appendRunCreatedEvent(run, identity)` | 196–203 | Logs `run_created` or `run_continue`. |
+| `recordProfileMismatch(ctx, run, identity)` | 205–223 | Logs `profile_mismatch` on continuation with a different profile. |
+| `restoreSlotsOnContinuation(run, isContinuation)` | 225–239 | Restores `slots.json` when continuing. |
+| `loadRunProfile(ctx)` | 241–248 | Loads `.profiles/{profile}.md` and wraps errors with profile name. |
+| `loadMergedPolicy(ctx, profile)` | 250–261 | Loads project policy and merges profile `tools` allowlist. |
+| `registerProfilePlaceholders(cwd, profile)` | 263–269 | Registers frontmatter placeholders. |
+| `registerProfileRegistryEntries(cwd, profile, registryStorage)` | 271–300 | Registers frontmatter registry entries with normalized lifecycle/frequency. |
+| `normalizeFrequency(frequency)` | 302–311 | Removes undefined frequency keys before registry registration. |
+| `appendRunStartEvent(run, runId, params)` | 313–325 | Logs `run_start`. |
+| `buildActionContexts(actions)` | 327–331 | Converts params actions to policy action contexts; defaults to one read. |
+| `toActionContext(action)` | 333–340 | Maps optional action fields to `ActionContext`. |
+| `executeActionLoop(input)` | 342–389 | Executes each action and appends assistant messages. |
+| `createArtifacts(ctx, run, identity, status)` | 391–416 | Reads durable event count and delegates to `generateRunArtifacts()`. |
+| `appendRunEndEvent(run, runId, status)` | 418–430 | Logs `run_end`. |
+| `writeFinalSessionState(run, runId, params, status)` | 432–446 | Writes final `session.json`. |
+| `persistSlots(run)` | 448–455 | Writes `slots.json`. |
+| `persistRegistry(registryStorage)` | 457–463 | Saves `registry.jsonl`. |
+| `buildRunResult(run, runId, status, artifacts)` | 465–486 | Assembles `RunResult`. |
+| `assertRunNotAborted(signal, message)` | 488–492 | Throws if signal is aborted. |
+| `stringifyUnknownError(err)` | 494–496 | Converts unknown errors to strings. |
+| `isoNow()` | 498–500 | Returns the current ISO timestamp for runtime JSONL records. |

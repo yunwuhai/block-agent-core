@@ -17,7 +17,6 @@ runtime-core
   -> registry
   -> policy
   -> storage/output
-  -> display
 ```
 
 Lifecycle scripts are no longer part of the runtime module set.

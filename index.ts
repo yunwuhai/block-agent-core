@@ -3,10 +3,9 @@
  *
  * Profile-based subagent invocation with durable session recording,
  * structured handoff, dynamic prompt registry control, permission enforcement,
- * and live TUI events.
+ * and transcript generation.
  *
  * Architecture:
- *   frontend/display/   — live TUI event rendering
  *   frontend/operation/ — profile resolution, child PI process orchestration
  *   backend/input/      — user profile and project config discovery
  *   backend/storage/    — runtime artifact persistence (.pi/subagents/runs)
@@ -18,7 +17,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { ToolParamsSchema, type ToolParams } from "./backend/input/mod.ts";
 import { reset as resetSlots } from "./backend/computation/prompt/engine.ts";
-import { renderSectioned } from "./frontend/display/mod.ts";
 import { executeRun } from "./frontend/operation/mod.ts";
 
 /**
@@ -95,13 +93,11 @@ export default function (pi: ExtensionAPI): void {
           ...(signal !== undefined ? { signal } : {}),
         });
 
-        const sectioned = renderSectioned(result.events);
         const summary = [
           `Efficiency Subagent: ${result.status.toUpperCase()}`,
           `Run ID: ${result.runId}`,
           `Handoff: ${result.handoffPath}`,
-          "",
-          sectioned,
+          ...(result.transcriptPath !== undefined ? [`Transcript: ${result.transcriptPath}`] : []),
         ].join("\n");
 
         const exitCode = result.status === "completed" ? 0 : result.status === "blocked" ? 2 : 1;
@@ -117,7 +113,8 @@ export default function (pi: ExtensionAPI): void {
               output: result.output,
               runId: result.runId,
               status: result.status,
-              events: result.events.map((e) => ({ type: e.type, label: e.label, status: e.status, detail: e.detail })),
+              handoffPath: result.handoffPath,
+              ...(result.transcriptPath !== undefined ? { transcriptPath: result.transcriptPath } : {}),
             }],
           },
         };
