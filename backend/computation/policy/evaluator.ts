@@ -112,6 +112,15 @@ function matchPath(actual: string, pattern: string): boolean {
 }
 
 function matchCommand(actual: string, pattern: string): boolean {
+  // Glob matching: "mkdir *" → matches "mkdir -p foo", "ls *" → matches "ls -la"
+  if (pattern.includes("*") || pattern.includes("?")) {
+    const regexStr = pattern
+      .replace(/[.+^${}()|[\]\\]/g, "\\$&") // escape regex specials except * and ?
+      .replace(/\*/g, ".*")
+      .replace(/\?/g, ".");
+    return new RegExp(`^${regexStr}$`).test(actual);
+  }
+  // No glob: exact command-name match or prefix match
   if (!pattern.includes(" ")) {
     const cmd = actual.split(/\s+/)[0] ?? actual;
     return cmd === pattern;
@@ -128,7 +137,7 @@ const PATH_OPS = new Set([
   "mkdir", "touch", "rm", "rmdir",
   "mv", "cp",
   "ls", "cat", "head", "tail", "less",
-  "echo", "tee", "dd",
+  "tee", "dd",
   "chmod", "chown",
 ]);
 

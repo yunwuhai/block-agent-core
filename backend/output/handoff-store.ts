@@ -1,5 +1,5 @@
 import { writeFile } from "node:fs/promises";
-import type { RunDirectory } from "./event-log.ts";
+import type { RunDirectory } from "../storage/event-log.ts";
 
 export interface FileTouch {
   readonly path: string;

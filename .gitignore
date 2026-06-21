@@ -1,4 +1,18 @@
 node_modules/
 dist/
-.pi/
 *.tsbuildinfo
+
+# PI runtime data
+.pi/
+
+# Prompt Registry runtime data
+registry.jsonl
+registry-calls.jsonl
+
+# Development / workflow test data
+data/
+.omo/
+
+# OS files
+.DS_Store
+Thumbs.db

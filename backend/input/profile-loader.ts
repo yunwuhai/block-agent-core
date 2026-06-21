@@ -21,7 +21,7 @@ import {
 type YamlScalar = string | number | boolean | null;
 type YamlValue = YamlScalar | YamlValue[] | { readonly [key: string]: YamlValue };
 
-function parseScalar(raw: string): YamlScalar {
+function parseScalar(raw: string): YamlValue {
   const trimmed = raw.trim();
   if (trimmed === "") return "";
   // Quoted strings
@@ -30,6 +30,12 @@ function parseScalar(raw: string): YamlScalar {
     (trimmed.startsWith("'") && trimmed.endsWith("'"))
   ) {
     return trimmed.slice(1, -1);
+  }
+  // Inline arrays: [item1, item2, ...]
+  if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+    const inner = trimmed.slice(1, -1).trim();
+    if (inner === "") return [];
+    return inner.split(",").map((item) => parseScalar(item.trim()));
   }
   // Booleans
   if (trimmed === "true" || trimmed === "True" || trimmed === "TRUE") return true;
@@ -123,6 +129,11 @@ function parseBlock(
     if (valueStr === "") {
       // Value continues on following indented lines
       i = parseNestedValue(lines, i, indent, key, result);
+    } else if (valueStr === "|" || valueStr === "|-" || valueStr === ">" || valueStr === ">-") {
+      // Literal (|) or folded (>) block scalar — capture indented lines as string
+      const scalarResult = parseBlockScalarFromLines(lines, i);
+      result[key] = scalarResult.value;
+      i = scalarResult.nextIdx;
     } else {
       // Scalar value on the same line
       result[key] = parseScalar(valueStr);
@@ -178,6 +189,50 @@ function parseNestedValue(
   return parsed.nextIdx;
 }
 
+function parseBlockScalarFromLines(
+  lines: readonly string[],
+  afterKeyLine: number,
+): { value: string; nextIdx: number } {
+  // The line after the key line (which had | or >) may be the indicator line itself,
+  // or the first content line. Skip past blank/comment lines to find the first content.
+  let i = afterKeyLine + 1;
+  while (i < lines.length) {
+    const t = lines[i]!.trim();
+    if (t !== "" && !t.startsWith("#")) break;
+    i++;
+  }
+
+  if (i >= lines.length) return { value: "", nextIdx: i };
+
+  // The first content line establishes the indent of the scalar block.
+  const contentIndent = indentOf(lines[i]!);
+  const parts: string[] = [];
+
+  while (i < lines.length) {
+    const line = lines[i]!;
+    const trimmed = line.trim();
+
+    // Blank lines inside scalar blocks are preserved as empty strings
+    if (trimmed === "") {
+      parts.push("");
+      i++;
+      continue;
+    }
+
+    // Full-line comments may appear inside scalar blocks at the content indent —
+    // YAML treats these as content, not comments. Keep them as-is.
+    // A line at less indent than contentIndent ends the block scalar.
+    const lineIndent = indentOf(line);
+    if (lineIndent < contentIndent) break;
+
+    // Content line — strip the common indent (contentIndent) and keep the rest
+    parts.push(line.slice(contentIndent));
+    i++;
+  }
+
+  return { value: parts.join("\n"), nextIdx: i };
+}
+
 function parseList(
   lines: readonly string[],
   startIdx: number,
@@ -199,12 +254,107 @@ function parseList(
     if (indent < baseIndent) break;
 
     if (indent === baseIndent && trimmed.startsWith("-")) {
-      const itemContent = trimmed.slice(1);
+      const itemContent = trimmed.slice(1); // skip "-"
       const valueStr = stripComment(itemContent);
-      result.push(valueStr === "" ? null : parseScalar(valueStr));
-      i++;
+
+      if (valueStr === "") {
+        // Empty list item: check for nested content on next indented lines
+        let peek = i + 1;
+        while (peek < lines.length) {
+          const pt = lines[peek]!.trim();
+          if (pt !== "" && !pt.startsWith("#")) break;
+          peek++;
+        }
+        if (peek < lines.length && indentOf(lines[peek]!) > baseIndent) {
+          const pt = lines[peek]!.trim();
+          if (pt.startsWith("-")) {
+            const nested = parseList(lines, peek, indentOf(lines[peek]!));
+            result.push(nested.value);
+            i = nested.nextIdx;
+          } else {
+            const nested = parseBlock(lines, peek, indentOf(lines[peek]!));
+            result.push(nested.value);
+            i = nested.nextIdx;
+          }
+        } else {
+          result.push(null);
+          i++;
+        }
+      } else if (valueStr.includes(":")) {
+        // Potential inline object start: "- key: value"
+        // Parse the first key-value pair, then continue with indented properties
+        const colonIdx = valueStr.indexOf(":");
+        const firstKey = valueStr.slice(0, colonIdx).trim();
+        const firstRest = valueStr.slice(colonIdx + 1).trimStart();
+        const firstValueStr = stripComment(firstRest);
+
+        // Build the object starting with this first key
+        const obj: Record<string, YamlValue> = {};
+
+        if (firstValueStr === "|" || firstValueStr === "|-" || firstValueStr === ">" || firstValueStr === ">-") {
+          // Block scalar value on the first property
+          const scalarResult = parseBlockScalarFromLines(lines, i);
+          obj[firstKey] = scalarResult.value;
+          i = scalarResult.nextIdx;
+        } else {
+          obj[firstKey] = firstValueStr === "" ? "" : parseScalar(firstValueStr);
+          i++;
+        }
+
+        // Check if next lines continue this object (more indented properties)
+        while (i < lines.length) {
+          const nextLine = lines[i]!;
+          const nextTrimmed = nextLine.trim();
+
+          // Skip blank/comment lines
+          if (nextTrimmed === "" || nextTrimmed.startsWith("#")) {
+            i++;
+            continue;
+          }
+
+          const nextIndent = indentOf(nextLine);
+
+          // If next content line is at baseIndent or less, it's a new list item
+          if (nextIndent <= baseIndent) break;
+
+          // If it's at an indent matching the expected property indent,
+          // parse it as a property of this object
+          if (nextTrimmed.includes(":")) {
+            const nColon = nextTrimmed.indexOf(":");
+            const nKey = nextTrimmed.slice(0, nColon).trim();
+            const nRest = nextTrimmed.slice(nColon + 1);
+            const nValueStr = stripComment(nRest);
+
+            if (nValueStr === "") {
+              // Nested value continues on further indented lines
+              const dummy: Record<string, YamlValue> = {};
+              i = parseNestedValue(lines, i, nextIndent, nKey, dummy);
+              if (nKey in dummy) {
+                obj[nKey] = dummy[nKey]!;
+              }
+            } else if (nValueStr === "|" || nValueStr === "|-" || nValueStr === ">" || nValueStr === ">-") {
+              const scalarResult = parseBlockScalarFromLines(lines, i);
+              obj[nKey] = scalarResult.value;
+              i = scalarResult.nextIdx;
+            } else {
+              obj[nKey] = parseScalar(nValueStr);
+              i++;
+            }
+          } else {
+            // Content line without colon — probably a continuation or error
+            // Break to avoid infinite loop
+            break;
+          }
+        }
+
+        result.push(obj);
+      } else {
+        // Simple scalar list item: "- value"
+        result.push(parseScalar(valueStr));
+        i++;
+      }
     } else {
-      // Non-list-item at same indent ends the list
+      // Non-list-item at same indent or deeper ends the list
       break;
     }
   }
@@ -260,48 +410,8 @@ function extractFrontmatter(content: string): ParsedProfile | null {
 // ---------------------------------------------------------------------------
 
 /** Resolve the `.profiles/` directory path for the given working directory. */
-export function resolveProfileDir(cwd: string): string {
+function resolveProfileDir(cwd: string): string {
   return join(cwd, ".profiles");
-}
-
-/**
- * List all available profiles by scanning `.profiles/*.md` and parsing
- * only the YAML frontmatter of each file. Returns an empty array when
- * the `.profiles/` directory does not exist.
- */
-export async function listProfiles(cwd: string): Promise<ProfileFrontmatter[]> {
-  const dir = resolveProfileDir(cwd);
-
-  let entries: string[];
-  try {
-    entries = await readdir(dir);
-  } catch {
-    return [];
-  }
-
-  const profiles: ProfileFrontmatter[] = [];
-
-  for (const entry of entries) {
-    if (!entry.endsWith(".md")) continue;
-
-    const filePath = join(dir, entry);
-    let content: string;
-    try {
-      content = await readFile(filePath, "utf-8");
-    } catch {
-      continue; // skip unreadable files
-    }
-
-    const parsed = extractFrontmatter(content);
-    if (parsed === null) continue;
-
-    const validated = ProfileFrontmatterSchema.safeParse(parsed.frontmatter);
-    if (validated.success) {
-      profiles.push(validated.data);
-    }
-  }
-
-  return profiles;
 }
 
 /**

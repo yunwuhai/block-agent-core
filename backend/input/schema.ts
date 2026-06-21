@@ -21,6 +21,38 @@ export const ToolParamsSchema = z.object({
 
 export type ToolParams = z.infer<typeof ToolParamsSchema>;
 
+// --- Registry entry schema (Prompt Registry) ---
+
+export const LifecycleConfigSchema = z.object({
+  type: z.enum(["permanent", "rounds", "time-window", "session"]),
+  maxRounds: z.number().positive().optional(),
+  validFrom: z.number().optional(),
+  validUntil: z.number().optional(),
+}).default({ type: "permanent" });
+
+export const FrequencyConfigSchema = z.object({
+  maxTotal: z.number().positive().optional(),
+  maxPer100: z.number().positive().optional(),
+  maxPer50: z.number().positive().optional(),
+  maxPer25: z.number().positive().optional(),
+}).optional();
+
+export const RegistryEntrySchema = z.object({
+  type: z.enum(["custom", "hook-output", "file", "template"]),
+  description: z.string(),
+  content: z.string().optional(),
+  filePath: z.string().optional(),
+  memberIds: z.array(z.string()).optional(),
+  name: z.string().optional(),
+  tags: z.array(z.string()).default([]),
+  group: z.string().optional(),
+  priority: z.number().default(0),
+  lifecycle: LifecycleConfigSchema,
+  frequency: FrequencyConfigSchema,
+});
+
+export type RegistryEntryInput = z.infer<typeof RegistryEntrySchema>;
+
 // --- Hook configuration (TypeScript-based, multi-script, per-tool hooks) ---
 
 export const ToolHookSchema = z.object({
@@ -44,6 +76,8 @@ export const ProfileFrontmatterSchema = z.object({
   description: z.string().optional(),
   tools: z.array(z.string()).optional(),
   hooks: HooksConfigSchema.optional(),
+  placeholders: z.record(z.string(), z.string()).optional(),
+  registry: z.array(RegistryEntrySchema).optional(),
 });
 
 export type ProfileFrontmatter = z.infer<typeof ProfileFrontmatterSchema>;

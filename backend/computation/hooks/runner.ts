@@ -1,7 +1,11 @@
 import type { HookContext, HookResult, HookSessionMessage } from "./types.ts";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const PLUGIN_DIR = new URL("../../..", import.meta.url).pathname;
-const HOOKS_DIR = `${PLUGIN_DIR}/hooks/scripts/`;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const PLUGIN_DIR = resolve(__dirname, "..", "..", "..");
+const HOOKS_DIR = resolve(__dirname, "..", "scripts");
 
 const SAFE_SCRIPT_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
 
@@ -20,6 +24,12 @@ export async function runHookScripts(
   let lastModifiedArgs: Record<string, unknown> | null = null;
   const aggregatedSessionMessages: HookSessionMessage[] = [];
 
+  // Diagnostic: log resolved paths on first hook execution to help PI runtime debugging
+  if (scripts.length > 0) {
+    console.log("[efficiency-subagent hooks] PLUGIN_DIR:", PLUGIN_DIR);
+    console.log("[efficiency-subagent hooks] HOOKS_DIR:", HOOKS_DIR);
+  }
+
   for (const scriptName of scripts) {
     // Reject path traversal / directory separators in hook script names
     if (!SAFE_SCRIPT_NAME_RE.test(scriptName)) {
@@ -31,12 +41,15 @@ export async function runHookScripts(
       };
     }
 
-    const scriptPath = `${HOOKS_DIR}${scriptName}.ts`;
+    const scriptPath = resolve(HOOKS_DIR, `${scriptName}.ts`);
 
     let hookModule: { default: (ctx: HookContext) => Promise<HookResult> };
     try {
+      console.log("[efficiency-subagent hooks] Importing hook script:", scriptPath);
       hookModule = await import(scriptPath);
-    } catch {
+      console.log("[efficiency-subagent hooks] Hook script loaded:", scriptName);
+    } catch (err: unknown) {
+      console.warn("[efficiency-subagent hooks] Hook import failed:", scriptName, err instanceof Error ? err.message : String(err));
       continue;
     }
 

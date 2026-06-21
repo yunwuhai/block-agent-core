@@ -6,22 +6,21 @@
  * enforcement, and live TUI events.
  *
  * Architecture:
- *   display/   — live TUI event rendering
- *   storage/   — runtime artifact persistence (.pi/subagents/runs)
- *   runtime/   — profile resolution, child PI process orchestration
- *   runtime/prompt-slots/  — dynamic prompt slot engine
- *   runtime/hooks/  — hook script runner and slot insertion
- *   policy/    — permission schema, merge, and evaluator
- *   config/    — user profile and project config discovery
+ *   frontend/display/   — live TUI event rendering
+ *   frontend/operation/ — profile resolution, child PI process orchestration
+ *   backend/input/      — user profile and project config discovery
+ *   backend/storage/    — runtime artifact persistence (.pi/subagents/runs)
+ *   backend/computation/prompt/ — dynamic prompt slot engine
+ *   backend/computation/hooks/  — hook script runner and slot insertion
+ *   backend/computation/policy/ — permission schema, merge, and evaluator
  *   tests/     — test harness and scenario coverage
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { ToolParamsSchema, type ToolParams } from "./config/mod.ts";
-import { executeRun } from "./runtime/mod.ts";
-import { reset as resetSlots } from "./runtime/prompt-slots/engine.ts";
-import { renderCompact, renderSectioned } from "./display/mod.ts";
-import { listRunIds } from "./storage/mod.ts";
+import { ToolParamsSchema, type ToolParams } from "./backend/input/mod.ts";
+import { reset as resetSlots } from "./backend/computation/prompt/engine.ts";
+import { renderSectioned } from "./frontend/display/mod.ts";
+import { executeRun } from "./frontend/operation/mod.ts";
 
 /**
  * TUI-compatible renderable text — satisfies the PI TUI Box.render contract.

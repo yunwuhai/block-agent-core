@@ -1,5 +1,5 @@
-import type { EventEntry, ToolLogEntry, RunDirectory } from "./event-log.ts";
-import { readEvents } from "./event-log.ts";
+import type { EventEntry, RunDirectory, ToolLogEntry } from "../storage/event-log.ts";
+import { readEvents } from "../storage/event-log.ts";
 
 export interface TranscriptView {
   readonly runId: string;
