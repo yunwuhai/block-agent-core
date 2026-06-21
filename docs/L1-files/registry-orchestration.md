@@ -38,7 +38,7 @@ Central mutable schedule manager for a single round. No default export; named im
 | Method | Lines | Description |
 |---|---|---|
 | `listScheduled()` → `{tags, ids, groups, templates, count}` | 169–197 | Returns a full summary of the current schedule: all tracked tags/ids/groups/templates plus a deduplicated count of all unique entry IDs across all sources. |
-| `listAvailable(runCtx?: RunContext)` → `Array<{id, type, tags, group?, description}>` | 203–225 | Returns all entries from storage as raw data for ToC table generation. Each entry exposes id, type, tags, optional group, and description. |
+| `listAvailable(runCtx?: RunContext)` → `Array<{id, type, tags, group?, description}>` | 202–218 | Returns all entries from storage as raw data for ToC table generation. Each entry exposes id, type, tags, optional group, and description; lifecycle filtering is handled during resolution. |
 
 ### State Management
 

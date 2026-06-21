@@ -57,8 +57,6 @@ function formatEvent(e: EventEntry, maxOutputLength: number): string {
           : "(no output)";
       return `### Result: \`${e.toolName ?? "?"}\`${e.isError === true ? " ❌ error" : ""}\n\n${sliced}`;
     }
-    case "hook_exec":
-      return `### Hook: ${e.phase ?? "?"} (${e.script ?? "?"})\n\n- **Exit**: ${e.exitCode ?? "?"}`;
     case "policy_block":
       return `### 🚫 Blocked: ${e.reason ?? "policy violation"}\n\n- **Tool**: \`${e.toolName ?? "?"}\``;
     case "slot_mutation":

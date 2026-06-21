@@ -79,7 +79,7 @@ export function evaluate(context: ActionContext, policy: MergedPolicy | null): P
   }
 
   // -- Bash path extraction: check file paths embedded in bash commands --
-  // e.g. "mkdir novel-writer/test2" → "novel-writer/test2" checked against paths/excludePaths
+  // e.g. "mkdir project/test2" → "project/test2" checked against paths/excludePaths
   if (context.command && policy.paths && policy.paths.length > 0) {
     const bashPaths = extractBashPaths(context.command);
     for (const bp of bashPaths) {

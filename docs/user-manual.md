@@ -6,7 +6,7 @@ This manual explains how to use and understand the efficiency-subagent project. 
 
 ## What This Project Is
 
-The efficiency-subagent is a profile-based subagent plugin for the PI Coding Agent. It lets you invoke controlled subagents that run with sandboxed permissions, hook scripts, dynamic prompt injection, and durable session persistence. Every run produces a structured handoff document so subsequent invocations can resume where the previous one left off. The plugin lives entirely inside the host agent's extension system and does not manage its own LLM calls or sandbox process.
+The efficiency-subagent is a profile-based subagent plugin for the PI Coding Agent. It lets you invoke controlled subagents with policy permissions, dynamic prompt registry control, and durable session persistence. Every run produces a structured handoff document so subsequent invocations can resume where the previous one left off. The plugin lives entirely inside the host agent's extension system and does not manage its own LLM calls or sandbox process.
 
 ---
 
@@ -30,8 +30,7 @@ The system has 16 functional modules arranged in two layers (Frontend and Backen
 │  │ profile-mgmt  │ │ -generation  │ │durable-│ │policy-engine││
 │  │ project-policy│ │              │ │run-str │ │registry pipe││
 │  │               │ │              │ │registry│ │prompt-engine││
-│  │               │ │              │ │-storage│ │hook-system  ││
-│  │               │ │              │ │        │ │hook-scripts ││
+│  │               │ │              │ │-storage│ │             ││
 │  └──────────────┘ └──────────────┘ └────────┘ └────────────┘│
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -46,7 +45,7 @@ The system has 16 functional modules arranged in two layers (Frontend and Backen
 
 **Backend Storage** owns all persistence. Two modules: durable-run-storage (run directories, JSONL event/tool logs) and registry-storage (JSONL-backed prompt registry with four O(1) in-memory indexes).
 
-**Backend Computation** is the largest layer at 7 modules. It contains the policy engine, the full prompt registry pipeline (types, engine, composer), the prompt-engine (slot/placeholder management), the hook-system (script runner and output injection), and hook-scripts (user-authored executable scripts).
+**Backend Computation** contains the policy engine, the full prompt registry pipeline (types, engine, composer), and the prompt-engine (slot/placeholder management).
 
 ### Execution Flow
 
@@ -54,16 +53,20 @@ The primary execution path runs top-down:
 
 ```
 User invokes tool → root-entry validates params → profile/project config loaded
-→ policy merged → before_agent hooks → prompt built (registry + slots + placeholders)
-→ action loop (per-action: policy check → before_tool hook → tool → after_tool hook)
-→ after_agent hooks → transcript built → handoff written → storage persisted → TUI rendered
+→ policy merged → prompt built (registry + slots + placeholders)
+→ action loop (per-action: policy check → simulated tool)
+→ transcript built → handoff written → storage persisted → TUI rendered
 ```
 
 ---
 
 ## How to Invoke
 
-The plugin registers a single tool: `efficiency_subagent`. Call it with these parameters:
+The plugin registers one tool: `efficiency_subagent`.
+
+### efficiency_subagent Invocation
+
+Call it with these parameters:
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
@@ -72,21 +75,19 @@ The plugin registers a single tool: `efficiency_subagent`. Call it with these pa
 | `runId` | no | string | Resume a previous run by its ID |
 | `actions` | no | array | Pre-defined action list (skips LLM planning) |
 
-When you invoke with `profile` and `task`, the system loads the named profile's YAML frontmatter to determine: which tools are available, what hooks run at each phase, which placeholder values to register, which registry entries to activate, and what system prompt template to use. The `task` string becomes the user message to the subagent.
+When you invoke with `profile` and `task`, the system loads the named profile's YAML frontmatter to determine: which tools are available, which placeholder values to register, which registry entries to activate, and what system prompt template to use. The `task` string becomes the user message to the subagent.
 
 If you omit `runId`, a new run directory is created at `.pi/subagents/runs/{profile}-{task}-{timestamp}-{hexSuffix}/`. If you provide `runId`, the system resumes that run: it restores session metadata, slot state, and registry frequency counters from the existing run directory.
-
----
 
 ## Key Modules and When to Use Them
 
 ### Configuration (`config/`)
-**What it does:** Defines all Zod schemas (ToolParams, ProfileFrontmatter, HooksConfig, RegistryEntry, ProjectPolicy) and validates incoming parameters at the system boundary.
+**What it does:** Defines all Zod schemas (ToolParams, ProfileFrontmatter, RegistryEntry, ProjectPolicy) and validates incoming parameters at the system boundary.
 **When to interact:** If you're adding new tool parameters, you add a Zod schema here and wire validation in index.ts. If you're debugging a "parameter rejected" error, check `ToolParamsSchema` first.
 
 ### Profile Management (`config/profile-loader.ts`)
 **What it does:** Finds, loads, and parses `.profiles/*.md` files. Uses a custom recursive-descent YAML parser for the frontmatter block. Returns typed `ProfileDefinition` objects.
-**When to interact:** If you're creating or debugging a profile definition. Key functions: `listProfiles()`, `loadProfile(name)`.
+**When to interact:** If you're creating or debugging a profile definition. Key function: `loadProfile(name)`.
 
 ### Project Policy (`config/project-loader.ts`)
 **What it does:** Loads `.pi/efficiency-subagent/config.json` for project-level security rules. Returns `null` (allow all) when the file is missing or invalid.
@@ -102,14 +103,14 @@ If you omit `runId`, a new run directory is created at `.pi/subagents/runs/{prof
 
 ### Prompt Engine (`runtime/prompt-slots/engine.ts`)
 **What it does:** Manages dynamic prompt content through three mechanisms: registry-based composition (primary), `{{name}}` placeholder replacement (legacy), and named slot prepending by priority (legacy). Maintains module-level mutable state with serialization support.
-**When to interact:** If you're writing hook scripts that inject content, or if you need to understand how prompt assembly works. Key exports: `setSlot()`, `pushSlot()`, `popSlot()`, `setOnceSlot()`, `registerPlaceholder()`, `renderPromptWithRegistry()`, `serializeSlots()`, `deserializeSlots()`.
+**When to interact:** If you need to understand prompt assembly or continuation state. Key exports: `setSlot()`, `pushSlot()`, `popSlot()`, `setOnceSlot()`, `registerPlaceholder()`, `renderPromptWithRegistry()`, `serializeSlots()`, `deserializeSlots()`.
 
 ### Policy Engine (`policy/`)
 **What it does:** Merges multiple `PolicyEntry` sources into one `MergedPolicy`, then evaluates tool invocations across 7 dimensions: tool names, file paths (with glob support), bash commands, network domains/ports, env vars, nested subagent calls, and bash redirect targets.
 **When to interact:** If you're configuring sandbox restrictions for a profile, or if you're debugging a "blocked by policy" error. Key exports: `mergePolicies()`, `evaluate()`.
 
 ### Runtime Core (`runtime/runner.ts`)
-**What it does:** The 17-phase central orchestrator. Executes runs: loads profiles, merges policies, dispatches hooks, runs the action loop with retry logic, builds transcripts and handoffs, persists state. Also handles run ID resolution and continuation consistency checks.
+**What it does:** The central orchestrator. Executes runs: loads profiles, merges policies, renders prompts, runs the action loop with retry logic, builds transcripts and handoffs, persists state. Also handles run ID resolution and continuation consistency checks.
 **When to interact:** If you're tracing the execution lifecycle, adding new lifecycle phases, or debugging why a run failed. Key export: `executeRun(ctx)`.
 
 ### Root Entry (`index.ts`)
@@ -152,29 +153,9 @@ If you're the subagent LLM and you see a "ToC" section listing available documen
 
 ---
 
-## Hook System
+## Removed Lifecycle Script System
 
-Hooks are user-authored TypeScript scripts that execute at four lifecycle points: `before_agent`, `after_agent`, `before_tool`, `after_tool`. Scripts live in `hooks/scripts/` and are dynamically imported at runtime.
-
-### Lifecycle Phases
-
-- **before_agent**: Runs before the prompt is built and the action loop starts. Scripts can block execution by returning `allowed: false`.
-- **after_agent**: Runs after the action loop completes but before transcript and handoff generation.
-- **before_tool**: Runs before each individual tool invocation. Can modify tool arguments via `modifiedArgs`.
-- **after_tool**: Runs after each tool completes. Receives the tool result.
-
-### Script Contract
-
-Every hook script exports a function: `(ctx: HookContext) => Promise<HookResult>`. The context provides the run directory path, current phase, tool name/arguments (for tool hooks), and run metadata. The result can include slot content, modified arguments, and an optional session message.
-
-### Output Flow into Slots
-
-Hook output flows into the prompt through two injection strategies:
-
-1. **Direct slot injection**: `injectHookOutputAsSlot()` calls `setSlot()` on the prompt-engine, making the hook's output available as a named slot that gets prepended to the prompt by priority.
-2. **Registry-backed injection**: `registerHookOutput()` creates a temporary registry entry and schedules it for injection via the orchestrator. This is richer, allowing priority ordering and frequency control.
-
-Hook scripts can also produce `sessionMessage` results that get appended to the agent's conversation history.
+Lifecycle scripts are no longer part of this project. Tool execution is controlled by explicit action parameters and the policy engine. Prompt/context injection is handled by profile placeholders and the Prompt Registry.
 
 ---
 
@@ -241,7 +222,7 @@ To resume a run: invoke `efficiency_subagent` with `profile` set to the same pro
 
 ### Typical Workflow
 
-1. **Create a profile** in `.profiles/worker.md` with YAML frontmatter defining tools, hooks, placeholders, registry entries, and the prompt body.
+1. **Create a profile** in `.profiles/worker.md` with YAML frontmatter defining tools, placeholders, registry entries, and the prompt body.
 2. **Configure project policy** (optional) in `.pi/efficiency-subagent/config.json` to restrict what the subagent can do.
 3. **Invoke the subagent**: call `efficiency_subagent` with `profile: "worker"` and `task: "do X"`.
 4. **Read the handoff**: after the run, check `.pi/subagents/runs/{runId}/handoff.md` for the structured summary.
@@ -250,16 +231,13 @@ To resume a run: invoke `efficiency_subagent` with `profile` set to the same pro
 
 ### Profile Authoring Pattern
 
-A profile markdown file has two sections: YAML frontmatter (between `---` markers) and a markdown body. The frontmatter declares the subagent's system prompt, tool list, hook scripts, placeholder values, and registry entries. The body serves as additional context. Example structure:
+A profile markdown file has two sections: YAML frontmatter (between `---` markers) and a markdown body. The frontmatter declares the subagent's tool list, placeholder values, and registry entries. The body serves as additional context. Example structure:
 
 ```yaml
 name: worker
 description: General-purpose subagent
 systemPrompt: "You are a helpful coding assistant."
 tools: [read, write, bash, glob, grep]
-hooks:
-  before_agent: [announce-phase]
-  after_tool: [registry-output]
 placeholders:
   workspace: "/home/user/project"
 registry:
@@ -268,19 +246,6 @@ registry:
     priority: 10
     content: "Always write tests first."
 ```
-
-### Hook Script Authoring Pattern
-
-A hook script exports an async function. It receives `HookContext` and returns `HookResult`. The script can spawn shell commands via `Bun.spawnSync`, read files, and format output. Example contract:
-
-```typescript
-export default async function(ctx: HookContext): Promise<HookResult> {
-  // Do work, return result with optional slotContent, modifiedArgs, sessionMessage
-  return { allowed: true };
-}
-```
-
----
 
 ## Important Constraints
 
@@ -296,13 +261,13 @@ Subagents only have access to tools listed in their profile's `tools` array. If 
 
 All file operations (reads, writes, globs, grep) are constrained by path policies. Paths are matched against glob patterns (`*`, `**`) with explicit exclusions taking precedence over inclusions. The working directory is always the project root specified at invocation time.
 
-### No Workflow Engine
+### No Multi-Agent Workflow Orchestration
 
 This is a single-profile, single-run system. There is no planner-router graph, no multi-agent orchestration, and no DAG-based workflow execution. For multi-step pipelines, invoke the subagent multiple times with `runId` to chain runs.
 
 ### No Bundled Profiles
 
-The plugin ships with no built-in profiles. All profiles must be created by the user in `.profiles/*.md`. The `_example.ts` hook script in `hooks/scripts/` demonstrates the contract but is not a production hook.
+The plugin ships with no built-in profiles. All profiles must be created by the user in `.profiles/*.md`.
 
 ### Extension-Only Deployment
 

@@ -89,5 +89,12 @@ export function mergePolicies(...policies: readonly (PolicyEntry | undefined | n
     };
   }
 
-  return { tools, paths, bash, network, env, excludePaths };
+  return {
+    tools,
+    paths,
+    bash,
+    network,
+    env,
+    ...(excludePaths !== undefined ? { excludePaths } : {}),
+  };
 }

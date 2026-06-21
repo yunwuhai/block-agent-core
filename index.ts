@@ -2,8 +2,8 @@
  * Efficiency Subagent - Lightweight controllable subagent plugin for PI Coding Agent.
  *
  * Profile-based subagent invocation with durable session recording,
- * structured handoff, dynamic prompt slots, hook scripts, permission
- * enforcement, and live TUI events.
+ * structured handoff, dynamic prompt registry control, permission enforcement,
+ * and live TUI events.
  *
  * Architecture:
  *   frontend/display/   — live TUI event rendering
@@ -11,7 +11,6 @@
  *   backend/input/      — user profile and project config discovery
  *   backend/storage/    — runtime artifact persistence (.pi/subagents/runs)
  *   backend/computation/prompt/ — dynamic prompt slot engine
- *   backend/computation/hooks/  — hook script runner and slot insertion
  *   backend/computation/policy/ — permission schema, merge, and evaluator
  *   tests/     — test harness and scenario coverage
  */
@@ -27,8 +26,11 @@ import { executeRun } from "./frontend/operation/mod.ts";
  * PI's Box.render calls child.render() on each child; this object provides that method.
  * Functionally equivalent to `new Text(str, 0, 0)` from @earendil-works/pi-tui.
  */
-function renderText(str: string): { render(): string } {
-  return { render: () => str };
+function renderText(str: string): { render(width: number): string[]; invalidate(): void } {
+  return {
+    render: () => [str],
+    invalidate: () => {},
+  };
 }
 
 export default function (pi: ExtensionAPI): void {
@@ -39,7 +41,6 @@ export default function (pi: ExtensionAPI): void {
       "Profile-based subagent invocation with durable sessions and policy control.",
       "Params: profile (required), task (required), runId (optional), actions (optional action sequence).",
       "Every run creates .pi/subagents/runs/<runId>/ artifacts with JSONL facts, tool logs, transcript, and handoff.",
-      "Hooks run around agent/tool phases; output injected through prompt slots.",
       "Policy enforces tool names, file paths, bash commands, network, env vars, and nested subagent calls.",
     ].join(" "),
     parameters: {
@@ -79,7 +80,8 @@ export default function (pi: ExtensionAPI): void {
           : "";
         return {
           content: [{ type: "text", text: `Invalid params: ${parseResult.error.message}${hint}` }],
-          isError: true,
+          details: { mode: "single", results: [] },
+          terminate: true,
         };
       }
 
@@ -87,7 +89,11 @@ export default function (pi: ExtensionAPI): void {
       const cwd = ctx?.cwd ?? process.cwd();
 
       try {
-        const result = await executeRun({ cwd, params, signal });
+        const result = await executeRun({
+          cwd,
+          params,
+          ...(signal !== undefined ? { signal } : {}),
+        });
 
         const sectioned = renderSectioned(result.events);
         const summary = [
@@ -118,18 +124,19 @@ export default function (pi: ExtensionAPI): void {
       } catch (err) {
         return {
           content: [{ type: "text", text: `Efficiency Subagent failed: ${err instanceof Error ? err.message : String(err)}` }],
-          isError: true,
+          details: { mode: "single", results: [] },
+          terminate: true,
         };
       }
     },
-    renderCall: (params: Record<string, unknown>) => {
+    renderCall: (params) => {
       const task = String(params.task ?? "?").slice(0, 60);
       return renderText(`Efficiency Subagent: ${params.profile ?? "?"} — ${task}`);
     },
-    renderResult: (result: Record<string, unknown>) => {
+    renderResult: (result) => {
       if (result.details && typeof result.details === "object") {
-        const d = result.details as Record<string, unknown>;
-        const results = d.results as Array<Record<string, unknown>> | undefined;
+        const d = result.details;
+        const results = d.results;
         if (results && results.length > 0) {
           const r = results[0]!;
           const statusIcon = r.status === "completed" ? "✓" : r.status === "blocked" ? "🚫" : r.status === "failed" ? "✗" : "?";

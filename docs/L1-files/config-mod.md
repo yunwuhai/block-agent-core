@@ -1,33 +1,28 @@
-# config/mod.ts — Config module barrel
+# `backend/input/mod.ts` — Input module barrel
 
-**Purpose:** Barrel / index file for the `config/` module. Re-exports all schema types, validation helpers, profile loaders, and the project-policy loader so consumers import from `config/mod.ts` instead of individual files.
+**Purpose:** Barrel file for the input module. Re-exports schema values/types, parameter validation, profile loading, and project-policy loading so consumers do not import individual files directly.
 
 ## Exports
 
 | Export | Kind | Line | Description |
 |---|---|---|---|
-| `ActionSchema` | value | 1–14 | Zod schema for tool action definitions |
-| `ActionParams` | type | 1–14 | Inferred params type from `ActionSchema` |
-| `ToolParamsSchema` | value | 1–14 | Zod schema for tool invocation parameters |
-| `ToolParams` | type | 1–14 | Inferred type from `ToolParamsSchema` |
-| `ProfileFrontmatterSchema` | value | 1–14 | Zod schema for profile YAML frontmatter |
-| `ProfileFrontmatter` | type | 1–14 | Inferred type from `ProfileFrontmatterSchema` |
-| `ProfileDefinition` | type | 1–14 | Resolved profile definition type |
-| `HooksConfigSchema` | value | 1–14 | Zod schema for hooks configuration |
-| `HooksConfig` | type | 1–14 | Inferred type from `HooksConfigSchema` |
-| `ToolHookSchema` | value | 1–14 | Zod schema for individual hook definitions |
-| `ProjectPolicySchema` | value | 1–14 | Zod schema for project-level policy |
-| `ProjectPolicy` | type | 1–14 | Inferred type from `ProjectPolicySchema` |
-| `validateToolParams` | function | 15 | Validate tool params against schema, return normalized result |
-| `loadProfile` | function | 16 | Load a profile by name from configured directories |
-| `listProfiles` | function | 16 | List all available profile names |
-| `resolveProfileDir` | function | 16 | Resolve filesystem path for a given profile name |
-| `loadProjectPolicy` | function | 17 | Load and merge project-level policy from config |
+| `ActionSchema` | value | 2 | Zod schema for tool action definitions. |
+| `ActionParams` | type | 3 | Inferred params type from `ActionSchema`. |
+| `ToolParamsSchema` | value | 4 | Zod schema for tool invocation parameters. |
+| `ToolParams` | type | 5 | Inferred type from `ToolParamsSchema`. |
+| `ProfileFrontmatterSchema` | value | 6 | Zod schema for profile YAML frontmatter. |
+| `ProfileFrontmatter` | type | 7 | Inferred type from `ProfileFrontmatterSchema`. |
+| `ProfileDefinition` | type | 8 | Resolved profile definition type. |
+| `ProjectPolicySchema` | value | 9 | Zod schema for project-level policy. |
+| `ProjectPolicy` | type | 10 | Inferred type from `ProjectPolicySchema`. |
+| `validateToolParams` | function | 12 | Validate tool params against schema. |
+| `loadProfile` | function | 13 | Load a profile by name from `.profiles/`. |
+| `loadProjectPolicy` | function | 14 | Load project-level policy from config. |
 
 ## Source
 
 Re-exports from:
-- `./schema.ts` — Zod schemas and inferred types
-- `./params.ts` — `validateToolParams`
-- `./profile-loader.ts` — `loadProfile`, `listProfiles`, `resolveProfileDir`
-- `./project-loader.ts` — `loadProjectPolicy`
+- `./schema.ts` — Zod schemas and inferred types.
+- `./params.ts` — `validateToolParams`.
+- `./profile-loader.ts` — `loadProfile`.
+- `./project-loader.ts` — `loadProjectPolicy`.

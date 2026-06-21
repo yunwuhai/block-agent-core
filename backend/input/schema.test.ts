@@ -46,7 +46,7 @@ describe("ToolParamsSchema", () => {
   });
 
   it("accepts extra keys (strips silently)", () => {
-    const result = ToolParamsSchema.safeParse({ profile: "worker", task: "x", workflow: { spec: {} } });
+    const result = ToolParamsSchema.safeParse({ profile: "worker", task: "x", extra: { spec: {} } });
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data).toEqual({ profile: "worker", task: "x" });
@@ -60,16 +60,13 @@ describe("ProfileFrontmatterSchema", () => {
     expect(result.success).toBe(true);
   });
 
-  it("accepts full profile frontmatter with hook scripts", () => {
+  it("accepts full profile frontmatter without lifecycle scripts", () => {
     const result = ProfileFrontmatterSchema.safeParse({
       name: "worker",
       description: "General worker",
       tools: ["read", "bash"],
-      hooks: {
-        before_agent: ["setup", "security-check"],
-        tools: {
-          read: { before: ["log-access"] },
-        },
+      placeholders: {
+        guidelines: "docs/guidelines.md",
       },
     });
     expect(result.success).toBe(true);

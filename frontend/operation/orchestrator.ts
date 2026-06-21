@@ -1,6 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import type { ActionParams, HooksConfig, ProfileDefinition, ToolParams } from "../../backend/input/mod.ts";
+import type { ActionParams, ProfileDefinition, ToolParams } from "../../backend/input/mod.ts";
 import { loadProfile } from "../../backend/input/profile-loader.ts";
 import { loadProjectPolicy } from "../../backend/input/project-loader.ts";
 import type { DisplayEvent } from "../display/mod.ts";
@@ -31,7 +31,6 @@ import {
   sessionExists,
 } from "../../backend/storage/mod.ts";
 import type { GenerateRunArtifactsResult } from "../../backend/storage/mod.ts";
-import type { HookContext } from "../../backend/computation/hooks/types.ts";
 import {
   deserializeSlots,
   registerPlaceholder,
@@ -40,7 +39,10 @@ import {
   setRegistry,
 } from "../../backend/computation/prompt/engine.ts";
 import type { SerializedSlots } from "../../backend/computation/prompt/engine.ts";
-import { executeWithRetry, runPhaseHook } from "./tool-simulator.ts";
+import { executeWithRetry } from "./tool-simulator.ts";
+import type { FrequencyConfig } from "../../backend/computation/registry/types.ts";
+
+type ProfileRegistryFrequency = NonNullable<NonNullable<ProfileDefinition["frontmatter"]["registry"]>[number]["frequency"]>;
 
 const DEFAULT_RUN_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -78,12 +80,8 @@ interface ActionLoopInput {
   readonly run: RunDirectory;
   readonly runId: string;
   readonly policy: MergedPolicy;
-  readonly hooksConfig: HooksConfig | undefined;
   readonly events: DisplayEvent[];
   readonly actions: readonly ActionContext[];
-  readonly profileName: string;
-  readonly task: string;
-  readonly cwd: string;
   readonly signal: AbortSignal;
 }
 
@@ -121,21 +119,6 @@ async function executeRunWithSignal(
   assertRunNotAborted(effectiveSignal, "Run aborted after profile load");
 
   const policy = await loadMergedPolicy(ctx, profile);
-  const hooksConfig: HooksConfig | undefined = profile.frontmatter.hooks;
-  const agentHookCtx: HookContext = {
-    phase: "before_agent",
-    profile: ctx.params.profile,
-    task: ctx.params.task,
-    runId: identity.runId,
-    cwd: ctx.cwd,
-  };
-
-  const beforeOutcome = await runPhaseHook(hooksConfig, agentHookCtx, events);
-  assertRunNotAborted(effectiveSignal, "Run aborted after before_agent hooks");
-  if (!beforeOutcome.allowed) {
-    status = "blocked";
-  }
-  await appendHookSessionMessages(run, identity.runId, beforeOutcome.sessionMessages);
 
   registerProfilePlaceholders(ctx.cwd, profile);
   registerProfileRegistryEntries(ctx.cwd, profile, registryStorage);
@@ -153,32 +136,16 @@ async function executeRunWithSignal(
     content: fullPrompt,
   });
 
-  if (!beforeOutcome.allowed) {
-    events.push(formatPolicyBlock("Blocked by before_agent hooks — agent execution skipped"));
-  } else {
-    status = await executeActionLoop({
-      run,
-      runId: identity.runId,
-      policy,
-      hooksConfig,
-      events,
-      actions: buildActionContexts(ctx.params.actions),
-      profileName: ctx.params.profile,
-      task: ctx.params.task,
-      cwd: ctx.cwd,
-      signal: effectiveSignal,
-    });
-  }
+  status = await executeActionLoop({
+    run,
+    runId: identity.runId,
+    policy,
+    events,
+    actions: buildActionContexts(ctx.params.actions),
+    signal: effectiveSignal,
+  });
 
-  assertRunNotAborted(effectiveSignal, "Run aborted before after_agent hooks");
-
-  const afterOutcome = await runPhaseHook(hooksConfig, { ...agentHookCtx, phase: "after_agent" }, events);
-  if (!afterOutcome.allowed && status !== "blocked") {
-    status = "blocked";
-  }
-  await appendHookSessionMessages(run, identity.runId, afterOutcome.sessionMessages);
-
-  const artifacts = await createArtifacts(ctx, run, identity, events, status, beforeOutcome.allowed);
+  const artifacts = await createArtifacts(ctx, run, identity, events, status);
   pushArtifactEvents(events, artifacts);
   events.push(formatRunEnd(status === "completed"));
   await appendRunEndEvent(run, identity.runId, status);
@@ -351,10 +318,21 @@ function registerProfileRegistryEntries(
         ...(entryInput.lifecycle.validFrom !== undefined ? { validFrom: entryInput.lifecycle.validFrom } : {}),
         ...(entryInput.lifecycle.validUntil !== undefined ? { validUntil: entryInput.lifecycle.validUntil } : {}),
       },
-      ...(entryInput.frequency !== undefined ? { frequency: entryInput.frequency } : {}),
+      ...normalizeFrequency(entryInput.frequency),
       createdBy: "user",
     });
   }
+}
+
+function normalizeFrequency(frequency: ProfileRegistryFrequency | undefined): { frequency?: FrequencyConfig } {
+  if (frequency === undefined) return {};
+  const normalized: FrequencyConfig = {
+    ...(frequency.maxTotal !== undefined ? { maxTotal: frequency.maxTotal } : {}),
+    ...(frequency.maxPer100 !== undefined ? { maxPer100: frequency.maxPer100 } : {}),
+    ...(frequency.maxPer50 !== undefined ? { maxPer50: frequency.maxPer50 } : {}),
+    ...(frequency.maxPer25 !== undefined ? { maxPer25: frequency.maxPer25 } : {}),
+  };
+  return { frequency: normalized };
 }
 
 async function appendRunStartEvent(
@@ -424,12 +402,8 @@ async function executeActionLoop(input: ActionLoopInput): Promise<RunStatus> {
         input.run,
         input.runId,
         input.policy,
-        input.hooksConfig,
         input.events,
         actionCtx,
-        input.profileName,
-        input.task,
-        input.cwd,
         input.signal,
       );
 
@@ -462,33 +436,18 @@ async function executeActionLoop(input: ActionLoopInput): Promise<RunStatus> {
   return status;
 }
 
-async function appendHookSessionMessages(
-  run: RunDirectory,
-  runId: string,
-  messages: readonly { readonly role: "user" | "assistant"; readonly content: string }[],
-): Promise<void> {
-  for (const msg of messages) {
-    await appendSession(run, { timestamp: isoNow(), runId, event: "message", ...msg });
-  }
-}
-
 async function createArtifacts(
   ctx: RunContext,
   run: RunDirectory,
   identity: RunIdentity,
   events: readonly DisplayEvent[],
   status: RunStatus,
-  agentRan: boolean,
 ): Promise<GenerateRunArtifactsResult> {
   const accomplished = [`Loaded profile "${ctx.params.profile}"`];
   if (identity.isContinuation) {
     accomplished.push("Resumed prior session");
   }
-  if (!agentRan) {
-    accomplished.push("Agent execution skipped (blocked by before_agent hooks)");
-  } else {
-    accomplished.push("Executed hooks (before_agent)");
-  }
+  accomplished.push("Executed configured action sequence");
 
   return generateRunArtifacts(run, {
     runId: identity.runId,
@@ -499,8 +458,8 @@ async function createArtifacts(
     isContinuation: identity.isContinuation,
     eventCount: events.length + 1,
     accomplished,
-    includeToolAccomplishments: agentRan,
-    pending: status === "blocked" ? ["Resolve policy/hook block and retry"] : [],
+    includeToolAccomplishments: true,
+    pending: status === "blocked" ? ["Resolve policy block and retry"] : [],
     ...(events[0]?.timestamp !== undefined ? { startedAt: events[0].timestamp } : {}),
   });
 }

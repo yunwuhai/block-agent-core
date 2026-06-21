@@ -25,7 +25,6 @@
  *   setOnceSlot(name, content, priority, ttlMs) — one-time-use slot (consumes=1)
  *   renderPrompt(base, consume) — (async) legacy: replaces {{name}} then prepends slots
  *   clearSlot(name) — removes a specific slot
- *   clearHookSlots() — removes all hook-injected slots
  *   reset() — removes ALL state (slots, stacks, placeholders, event log)
  */
 
@@ -37,7 +36,7 @@ import type { RegistryStorage } from "../registry/storage.ts";
 import type { RunContext } from "../registry/types.ts";
 
 // ---------------------------------------------------------------------------
-// Path resolution — same approach as hooks/runner.ts
+// Path resolution
 // ---------------------------------------------------------------------------
 
 const __filename = fileURLToPath(import.meta.url);
@@ -99,7 +98,7 @@ export async function renderPromptWithRegistry(
     basePrompt: base,
     orchestrator: registryOrchestrator,
     storage: registryStorage,
-    runCtx,
+    ...(runCtx !== undefined ? { runCtx } : {}),
   });
 }
 
@@ -170,7 +169,6 @@ export function registerPlaceholder(name: string, filePath: string): void {
         name,
         tags: ["placeholder"],
         createdBy: "system",
-        lifecycle: { type: "permanent" },
       });
     }
   }
@@ -260,16 +258,6 @@ export function expireStaleSlots(): string[] {
     }
   }
   return expired;
-}
-
-export function clearHookSlots(): void {
-  for (const name of slots.keys()) {
-    if (name.startsWith("hook_")) {
-      slots.delete(name);
-      stacks.delete(name);
-      eventLog.push({ operation: "clear", slotName: name });
-    }
-  }
 }
 
 // ---------------------------------------------------------------------------

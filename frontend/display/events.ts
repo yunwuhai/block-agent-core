@@ -1,7 +1,7 @@
 import { isoNow } from "./iso-now.ts";
 
 export interface DisplayEvent {
-  readonly type: "run_start" | "run_end" | "tool_call" | "tool_result" | "hook" | "policy" | "slot" | "handoff";
+  readonly type: "run_start" | "run_end" | "tool_call" | "tool_result" | "policy" | "slot" | "handoff";
   readonly timestamp: string;
   readonly label: string;
   readonly detail: string;
@@ -40,12 +40,14 @@ export function createEvent(config: {
     label: sanitize(config.label),
     detail: sanitize(config.detail),
     status: config.status,
-    expandable: config.expandable
+    ...(config.expandable
       ? {
-          title: sanitize(config.expandable.title),
-          body: config.expandable.body,
+          expandable: {
+            title: sanitize(config.expandable.title),
+            body: config.expandable.body,
+          },
         }
-      : undefined,
+      : {}),
   };
 }
 
@@ -98,28 +100,10 @@ export function formatToolResult(name: string, output: string, isError: boolean)
   });
 }
 
-export function formatHook(phase: string, script: string, ok: boolean): DisplayEvent {
-  return createEvent({
-    type: "hook",
-    label: `Hook [${phase}]: ${script}`,
-    detail: ok ? "OK" : "failed",
-    status: ok ? "ok" : "error",
-  });
-}
-
 export function formatPolicyBlock(reason: string): DisplayEvent {
   return createEvent({
     type: "policy",
     label: "Blocked by policy",
-    detail: reason,
-    status: "blocked",
-  });
-}
-
-export function formatHookBlock(reason: string): DisplayEvent {
-  return createEvent({
-    type: "policy",
-    label: "Blocked by hook",
     detail: reason,
     status: "blocked",
   });
@@ -187,7 +171,6 @@ const PHASE_MAP: Readonly<Record<DisplayEvent["type"], string>> = {
   run_end: "Run",
   tool_call: "Tool Calls",
   tool_result: "Tool Results",
-  hook: "Hooks",
   policy: "Policy",
   slot: "Slot Changes",
   handoff: "Handoff",

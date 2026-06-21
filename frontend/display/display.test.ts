@@ -4,7 +4,6 @@ import {
   formatRunEnd,
   formatToolCall,
   formatToolResult,
-  formatHook,
   formatPolicyBlock,
   formatSlotChange,
   formatHandoff,
@@ -49,12 +48,6 @@ describe("Display events format", () => {
     expect(event.type).toBe("tool_result");
     expect(event.detail.length).toBeLessThan(250);
     expect(event.expandable).toBeDefined();
-  });
-
-  it("formatHook shows phase and script", () => {
-    const event = formatHook("before_agent", "./hooks/setup.sh", true);
-    expect(event.status).toBe("ok");
-    expect(event.label).toContain("before_agent");
   });
 
   it("formatPolicyBlock shows blocked status", () => {

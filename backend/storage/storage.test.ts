@@ -82,7 +82,13 @@ describe("Storage event log", () => {
   it("writeHandoff creates a handoff.md file", async () => {
     const runId = generateRunId();
     const run = await createRunDir(TMP, runId);
-    const path = await writeHandoff(run, { runId, profile: "test", status: "completed", summary: "ok", artifacts: ["a.md"] });
+    const path = await writeHandoff(run, {
+      runId,
+      profile: "test",
+      status: "completed",
+      summary: { result: "ok" },
+      artifacts: [{ path: "a.md", description: "test artifact" }],
+    });
     expect(path).toBe(join(run.dir, "handoff.md"));
     expect(existsSync(path)).toBe(true);
   });

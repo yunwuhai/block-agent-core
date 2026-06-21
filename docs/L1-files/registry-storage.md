@@ -1,76 +1,42 @@
-# `registry/storage.ts` — JSONL-backed entry store with in-memory indexes
+# L1 — `backend/computation/registry/storage.ts`
 
-**Purpose:** Core storage engine for the Prompt Registry. Persists entries to `registry.jsonl` (project-level, full rewrite) and call history to `registry-calls.jsonl` (per-run, append-only). Maintains four in-memory indexes for O(1) lookups, plus per-entry sliding-window frequency counters.
-
-**In-memory indexes (rebuilt on `load()`):** `IdIndex` (`Map<id, RegistryEntry>`), `NameIndex` (`Map<name, id>`), `TagIndex` (`Map<tag, Set<id>>`), `GroupIndex` (`Map<group, Set<id>>`).
-
----
-
-## Internal class
-
-| Name | Lines | Description |
-|---|---|---|
-| `SlidingWindowCounter` | 46–88 | Per-entry frequency tracker. Three ring buffers (100/50/25) store call timestamps; `count(window)` returns entries in the last N calls (FIFO eviction). Private — only used inside `RegistryStorage`. Methods: `constructor(state?)`, `record(timestamp)`, `count(window)`, `total()`, `toState()`. |
+**Purpose:** JSONL-backed Prompt Registry storage. Persists entries to `registry.jsonl`, persists call history to per-run `registry-calls.jsonl`, maintains in-memory indexes by id/name/tag/group, and tracks per-entry frequency counters.
 
 ## Exports
 
-### `RegistryStorage` — exported class (lines 94–569)
-
-#### Persistence
+### `RegistryStorage` class
 
 | Method | Lines | Description |
 |---|---|---|
-| `constructor(jsonlPath)` | 107–109 | Set the path to `registry.jsonl`. Does not load automatically. |
-| `load()` | 119–134 | Read all lines from `registry.jsonl`, parse JSON, rebuild all in-memory indexes. No-op if file missing. Best-effort: skips malformed lines. |
-| `save()` | 140–148 | Full rewrite of `registry.jsonl` — serialize every entry in `idIndex` as one JSON object per line. |
+| `constructor(jsonlPath)` | 112–114 | Stores path to `registry.jsonl`. |
+| `load()` | 124–139 | Loads JSONL entries and rebuilds indexes. |
+| `save()` | 145–153 | Rewrites all registry entries as JSONL. |
+| `register(raw)` | 166–196 | Creates a new entry with UUID/timestamps/defaults and indexes it. Input omits generated/defaulted fields. |
+| `registerIfNew(raw)` | 207–240 | Deduplicates equivalent entries by type/description/content/filePath/createdBy/group, otherwise registers. Input omits generated/defaulted fields. |
+| `unregister(id)` | 246–253 | Removes entry and frequency counters. |
+| `get(id)` | 256–258 | Looks up by id. |
+| `getByName(name)` | 261–265 | Looks up placeholder-bound entry by name. |
+| `update(id, patch)` | 271–296 | Updates mutable fields and reindexes when needed. |
+| `addTag(id, tag)` | 303–310 | Adds a tag idempotently. |
+| `removeTag(id, tag)` | 313–320 | Removes a tag idempotently. |
+| `findByTags(tags, match)` | 331–367 | Finds entries matching any/all tags. |
+| `findByGroup(group)` | 370–376 | Finds entries in a group. |
+| `list(filter?)` | 384–399 | Lists entries with optional type/group/tag filters. |
+| `size` | 402–404 | Number of registered entries. |
+| `setCallsPath(path)` | 413–415 | Sets call-history JSONL path for current run. |
+| `recordCall(record)` | 421–435 | Appends a call record and updates frequency counters. |
+| `getCallHistory(entryId)` | 441–456 | Reads persisted call history for one entry. |
+| `getFrequency(entryId, window)` | 462–466 | Returns sliding-window count. |
+| `getTotalCalls(entryId)` | 469–473 | Returns lifetime call count. |
+| `loadFreqState(state)` | 479–483 | Restores frequency counter state. |
+| `exportFreqState()` | 486–492 | Exports frequency counter state. |
 
-#### CRUD
+## Internal
 
-| Method | Lines | Description |
+| Symbol | Lines | Description |
 |---|---|---|
-| `register(raw)` | 161–195 | Create a new entry with auto-generated UUID + timestamps. Accepts optional `tags`, `priority`, `lifecycle`. Populates all indexes. Returns the new `id`. |
-| `registerIfNew(raw)` | 209–248 | Register only if no equivalent entry exists (matched by type/description/content/filePath/createdBy/group). Hook entries (`createdBy === "hook"`) skip dedup. Returns existing or new `id`. |
-| `unregister(id)` | 254–261 | Remove entry by ID from all indexes + frequency counters. Returns `true` if existed. |
-| `get(id)` | 264–266 | O(1) lookup by ID. Returns `RegistryEntry \| undefined`. |
-| `getByName(name)` | 269–273 | O(1) lookup by `{{name}}` placeholder. Returns `RegistryEntry \| undefined`. |
-| `update(id, patch)` | 279–304 | Partial update of mutable fields (description, content, filePath, tags, group, priority, lifecycle, frequency, name, memberIds). Re-indexes if tags/group/name change. Returns `true` on success. |
-| `get size()` | 410–412 | Total number of registered entries (delegates to `idIndex.size`). |
-
-#### Tag management
-
-| Method | Lines | Description |
-|---|---|---|
-| `addTag(id, tag)` | 311–318 | Append a tag to an entry. Idempotent — no-op if tag already present. |
-| `removeTag(id, tag)` | 321–328 | Remove a tag from an entry. Idempotent — no-op if not present. |
-
-#### Index queries
-
-| Method | Lines | Description |
-|---|---|---|
-| `findByTags(tags, match)` | 339–375 | Lookup by tag set. `match: "any"` returns union (default), `match: "all"` returns intersection. |
-| `findByGroup(group)` | 378–384 | Return all entries in a group. |
-| `list(filter?)` | 392–407 | List all entries with optional filters: `type`, `group`, `tags` (any match). Returns full entry array. |
-
-#### Call history & frequency
-
-| Method | Lines | Description |
-|---|---|---|
-| `setCallsPath(path)` | 421–423 | Set path to `registry-calls.jsonl` for the current run. Must be called before `recordCall()`. |
-| `recordCall(record)` | 429–443 | Append a `CallRecord` JSONL line to the calls file + update in-memory sliding window counter. Creates directory if needed. |
-| `getCallHistory(entryId)` | 449–464 | Read `registry-calls.jsonl` and return all `CallRecord` lines matching `entryId`. |
-| `getFrequency(entryId, window)` | 470–474 | Return sliding-window call count for a given entry and window size (25, 50, or 100). |
-| `getTotalCalls(entryId)` | 477–481 | Return lifetime total call count for an entry. |
-| `loadFreqState(state)` | 487–491 | Deserialize frequency counter state (for session resume). |
-| `exportFreqState()` | 494–500 | Serialize all frequency counter states for persistence. |
-
-#### Internal helpers (private)
-
-| Method | Lines | Description |
-|---|---|---|
-| `indexEntry(entry)` | 507–535 | Add an entry to all four in-memory indexes. |
-| `unindexEntry(entry)` | 538–560 | Remove an entry from all four in-memory indexes. |
-| `clear()` | 563–569 | Wipe all indexes + frequency counters. |
-
----
-
-**Interaction with:** `./types.ts` (defines `RegistryEntry`, `CallRecord`, `SlidingWindowState`, `EntryType`, `LifecycleConfig`, `FrequencyConfig`).
+| `RegistryEntryInput` | 31–35 | Internal input type for registration; omits generated/defaulted registry fields. |
+| `SlidingWindowCounter` | 51–93 | Per-entry frequency tracker. |
+| `indexEntry(entry)` | 499–527 | Adds entry to all indexes. |
+| `unindexEntry(entry)` | 530–552 | Removes entry from all indexes. |
+| `clear()` | 555–561 | Clears indexes and counters. |

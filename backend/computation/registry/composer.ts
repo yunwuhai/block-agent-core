@@ -14,7 +14,7 @@
  * After composition, call history is recorded for every injected entry.
  */
 
-import type { RegistryEntry, RunContext, ResolvedEntry } from "./types.ts";
+import type { RunContext, ResolvedEntry } from "./types.ts";
 import type { RegistryStorage } from "./storage.ts";
 import type { ScheduleOrchestrator } from "./orchestration.ts";
 import { resolveScheduled, isActive } from "./resolution.ts";
@@ -34,7 +34,7 @@ const PLACEHOLDER_RE = /\{\{([\w-]+)\}\}/g;
  *   2. Unregistered `{{name}}` patterns are left as-is (safe degradation)
  *
  * Content sources (in priority order):
- *   a. `entry.content`  — inline text (hook-output entries)
+ *   a. `entry.content`  — inline prompt text
  *   b. `entry.filePath` — read from disk (custom / file entries)
  *
  * Missing/unreadable files emit a warning via a comment in the output

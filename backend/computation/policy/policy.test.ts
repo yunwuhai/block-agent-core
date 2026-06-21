@@ -96,8 +96,8 @@ describe("Policy evaluator", () => {
   });
 
   it("extracts mkdir paths for policy check", () => {
-    const policy: MergedPolicy = { tools: null, paths: ["novel-writer/**"], bash: null, network: null, env: null };
-    expect(evaluate({ toolName: "bash", command: "mkdir novel-writer/test" }, policy).allowed).toBe(true);
+    const policy: MergedPolicy = { tools: null, paths: ["project/**"], bash: null, network: null, env: null };
+    expect(evaluate({ toolName: "bash", command: "mkdir project/test" }, policy).allowed).toBe(true);
     expect(evaluate({ toolName: "bash", command: "mkdir /tmp/forbidden" }, policy).allowed).toBe(false);
   });
 
@@ -124,7 +124,7 @@ describe("Policy evaluator", () => {
   });
 
   it("skips path extraction for flag-only commands", () => {
-    const policy: MergedPolicy = { tools: null, paths: ["novel-writer/**"], bash: null, network: null, env: null };
+    const policy: MergedPolicy = { tools: null, paths: ["project/**"], bash: null, network: null, env: null };
     expect(evaluate({ toolName: "bash", command: "echo -n" }, policy).allowed).toBe(true);
   });
 
@@ -132,7 +132,7 @@ describe("Policy evaluator", () => {
     const allowedPolicy: MergedPolicy = { tools: null, paths: ["/tmp/**"], bash: null, network: null, env: null };
     expect(evaluate({ toolName: "bash", command: "echo>/tmp/out.txt" }, allowedPolicy).allowed).toBe(true);
 
-    const blockedPolicy: MergedPolicy = { tools: null, paths: ["novel-writer/**"], bash: null, network: null, env: null };
+    const blockedPolicy: MergedPolicy = { tools: null, paths: ["project/**"], bash: null, network: null, env: null };
     expect(evaluate({ toolName: "bash", command: "echo>/tmp/out.txt" }, blockedPolicy).allowed).toBe(false);
   });
 });

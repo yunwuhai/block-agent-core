@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { resolve, join } from "node:path";
+import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { ScheduleOrchestrator } from "./orchestration.ts";
@@ -207,13 +207,13 @@ describe("RegistryStorage", () => {
     storage = new RegistryStorage(tmpPath("registry.jsonl"));
 
     storage.register({ type: "custom", description: "C1", tags: ["a"], group: "g1", createdBy: "user", lifecycle: { type: "permanent" } });
-    storage.register({ type: "hook-output", description: "H1", tags: ["a"], group: "g2", createdBy: "hook", lifecycle: { type: "session" } });
+    storage.register({ type: "file", description: "F1", tags: ["a"], group: "g2", createdBy: "system", lifecycle: { type: "session" } });
     storage.register({ type: "custom", description: "C2", tags: ["b"], group: "g1", createdBy: "user", lifecycle: { type: "permanent" } });
 
     expect(storage.list({ type: "custom" })).toHaveLength(2);
     expect(storage.list({ group: "g1" })).toHaveLength(2);
     expect(storage.list({ tags: ["a"] })).toHaveLength(2);
-    expect(storage.list({ type: "hook-output" })).toHaveLength(1);
+    expect(storage.list({ type: "file" })).toHaveLength(1);
   });
 });
 
@@ -310,7 +310,7 @@ describe("Resolution Engine", () => {
     expect(isActive(entry, makeRunCtx(), 0)).toBe(false);
   });
 
-  it("exceedsFrequency returns true when cap reached", () => {
+  it("exceedsFrequency returns true when cap reached", async () => {
     testDir = join(tmpdir(), `registry-test-${randomUUID()}`);
     mkdirSync(testDir, { recursive: true });
     const s = new RegistryStorage(tmpPath("registry.jsonl"));
@@ -326,8 +326,8 @@ describe("Resolution Engine", () => {
     expect(exceedsFrequency(s.get(id)!, s)).toBe(false);
 
     // Record 2 calls
-    s.recordCall({ entryId: id, roundId: "r1", timestamp: Date.now(), trigger: "tag" });
-    s.recordCall({ entryId: id, roundId: "r2", timestamp: Date.now(), trigger: "tag" });
+    await s.recordCall({ entryId: id, roundId: "r1", timestamp: Date.now(), trigger: "tag" });
+    await s.recordCall({ entryId: id, roundId: "r2", timestamp: Date.now(), trigger: "tag" });
 
     // Wait for async calls to be processed in the counter — sync check
     expect(s.getTotalCalls(id)).toBe(2);
@@ -542,7 +542,7 @@ describe("Message Composer", () => {
 
   it("buildToCTable generates markdown table with active entries", () => {
     storage.register({ type: "custom", description: "First entry", tags: ["a", "b"], createdBy: "user", lifecycle: { type: "permanent" } });
-    storage.register({ type: "hook-output", description: "Second entry", tags: ["c"], createdBy: "hook", lifecycle: { type: "permanent" } });
+    storage.register({ type: "custom", description: "Second entry", tags: ["c"], createdBy: "system", lifecycle: { type: "permanent" } });
 
     const table = buildToCTable(storage, makeRunCtx());
     expect(table).toContain("## Available Context");
@@ -666,21 +666,21 @@ describe("End-to-end Registry flow", () => {
     expect(fsId).toBeString();
     expect(bashId).toBeString();
 
-    // 2. Register hook output
-    const hookTags = ["before_tool", "mkdir", "auto-generated"];
-    const hookId = storage.register({
-      type: "hook-output",
-      description: "mkdir before_tool output",
+    // 2. Register runtime observation as inline context
+    const observationTags = ["tool-output", "mkdir", "auto-generated"];
+    const observationId = storage.register({
+      type: "custom",
+      description: "mkdir tool output",
       content: "[ls output] test/ exists",
-      tags: hookTags,
-      group: "hook-outputs",
+      tags: observationTags,
+      group: "runtime-observations",
       priority: 0,
       lifecycle: { type: "session", createdAt: Date.now() },
-      createdBy: "hook",
+      createdBy: "system",
     });
 
-    // Auto-schedule the hook output
-    orchestrator.scheduleIds([hookId]);
+    // Auto-schedule the runtime observation
+    orchestrator.scheduleIds([observationId]);
 
     // 3. LLM schedules security policies (both entries share "security" tag)
     const scheduleResult = orchestrator.scheduleTags(["security"]);
@@ -688,7 +688,7 @@ describe("End-to-end Registry flow", () => {
 
     // 4. Compose message
     const result = await composeMessage({
-      basePrompt: "用mkdir在novel-writer中创建文件夹",
+      basePrompt: "用mkdir在project中创建文件夹",
       orchestrator,
       storage,
       runCtx: makeRunCtx(),
@@ -698,7 +698,7 @@ describe("End-to-end Registry flow", () => {
     expect(result).toContain("## Available Context");
     expect(result).toContain("文件系统安全策略");
     expect(result).toContain("Bash命令安全规则");
-    expect(result).toContain("mkdir before_tool output");
+    expect(result).toContain("mkdir tool output");
     expect(result).toContain("仅允许在test/目录写入");
     expect(result).toContain("禁止rm -rf");
     expect(result).toContain("[ls output]");

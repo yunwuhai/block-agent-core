@@ -1,17 +1,14 @@
-# `runtime/mod.ts`
+# L1 — `frontend/operation/mod.ts`
 
-Barrel file for the runtime module. Re-exports the execution orchestrator and its associated types from `./runner.ts`.
+**Purpose:** Barrel file for operation-layer execution. Re-exports the run orchestrator and tool simulator entry points.
 
 ## Exports
 
-### From `./runner.ts` (lines 1–2)
-
-| Export | Kind | Line |
-|---|---|---|
-| `executeRun` | function | 1 |
-| `RunContext` | type | 2 |
-| `RunResult` | type | 2 |
-
-## Purpose
-
-Single import point for the top-level run orchestration — callers import `executeRun`, `RunContext`, and `RunResult` from `./runtime/mod.ts` rather than the internal `./runner.ts` directly.
+| Export | Kind | Line | Description |
+|---|---|---|---|
+| `executeRun` | function | 1 | Top-level run lifecycle entry point. |
+| `RunContext` | type | 2 | Input shape for `executeRun()`. |
+| `RunResult` | type | 2 | Result shape from `executeRun()`. |
+| `executeWithRetry` | function | 3 | Retry wrapper around one tool interaction. |
+| `simulateToolInteraction` | function | 3 | Single-tool simulated execution pipeline. |
+| `ToolInteractionResult` | type | 4 | Output/blocking result from tool execution. |

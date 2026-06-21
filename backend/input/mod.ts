@@ -6,9 +6,6 @@ export {
   ProfileFrontmatterSchema,
   type ProfileFrontmatter,
   type ProfileDefinition,
-  HooksConfigSchema,
-  type HooksConfig,
-  ToolHookSchema,
   ProjectPolicySchema,
   type ProjectPolicy,
 } from "./schema.ts";

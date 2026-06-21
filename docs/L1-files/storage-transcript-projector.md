@@ -12,10 +12,10 @@ Formats a run's event log into a human-readable Markdown transcript. Consumes `E
 | `TranscriptOptions` | interface | 10–13 | Options: `includeJson` (attach raw events), `maxOutputLength` (truncate tool output) |
 | `buildTranscript()` | async fn | 15–34 | Read events via `readEvents(run)`, format each with `formatEvent()`, join as Markdown. Returns `TranscriptView` |
 | `buildJsonTranscript()` | async fn | 36–40 | Read events and return raw `EventEntry[]` without formatting |
-| `EventEntry` | type re-export | 73 | Re-exported from `event-log.ts` |
-| `ToolLogEntry` | type re-export | 73 | Re-exported from `event-log.ts` |
-| `RunDirectory` | type re-export | 74 | Re-exported from `event-log.ts` |
+| `EventEntry` | type re-export | 71 | Re-exported from `event-log.ts` |
+| `ToolLogEntry` | type re-export | 71 | Re-exported from `event-log.ts` |
+| `RunDirectory` | type re-export | 72 | Re-exported from `event-log.ts` |
 
 ### Private
 
-- **`formatEvent(e, maxOutputLength)`** (line 42–71) — Maps each `EventEntry.event` variant (`run_start`, `run_end`, `tool_call`, `tool_result`, `hook_exec`, `policy_block`, `slot_mutation`, `handoff_written`) to a Markdown section heading + details. Tool output is truncated to `maxOutputLength` characters (pass `-1` for no limit).
+- **`formatEvent(e, maxOutputLength)`** (line 42–69) — Maps each `EventEntry.event` variant (`run_start`, `run_end`, `tool_call`, `tool_result`, `policy_block`, `slot_mutation`, `handoff_written`) to a Markdown section heading + details. Tool output is truncated to `maxOutputLength` characters (pass `-1` for no limit). Unknown historical event variants fall back to a JSON block.

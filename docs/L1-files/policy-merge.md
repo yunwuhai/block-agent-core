@@ -24,8 +24,9 @@ Aggregate interface for a single policy entry — combines optional `tools`, `pa
 ### `MergedPolicy` (line 35–42)
 The result type after merging. All fields are nullable; absent rules produce `null`. `excludePaths` is optional.
 
-### `mergePolicies(...policies): MergedPolicy` (line 44–93)
+### `mergePolicies(...policies): MergedPolicy` (line 44–100)
 Main merge function. Accepts any number of `PolicyEntry | undefined | null`. Returns a single `MergedPolicy`:
 - `tools`, `paths`, `excludePaths`: additive union across all entries.
 - `bash`, `env`: union of `allow`/`deny` arrays; omitted if no entry defines them.
 - `network`: `allow` is OR'd (any entry allowing = allowed); domains/ports/schemes are unioned; omitted if no entry defines a network rule.
+- `excludePaths` is omitted entirely when absent, preserving `exactOptionalPropertyTypes`.

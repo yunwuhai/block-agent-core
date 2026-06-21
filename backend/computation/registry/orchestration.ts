@@ -19,7 +19,6 @@
  */
 
 import type {
-  RegistryEntry,
   ScheduleState,
   RunContext,
   ResolvedEntry,
@@ -200,7 +199,7 @@ export class ScheduleOrchestrator {
    * Return all available entries as raw data for ToC table generation.
    * Filters by lifecycle (excludes expired entries).
    */
-  listAvailable(runCtx?: RunContext): Array<{
+  listAvailable(_runCtx?: RunContext): Array<{
     id: string;
     type: string;
     tags: readonly string[];
@@ -209,12 +208,6 @@ export class ScheduleOrchestrator {
   }> {
     const all = this.storage.list();
     return all
-      .filter((e) => {
-        if (!runCtx) return true;
-        const lifecycleRound = this.lifecycleMap?.get(e.id) ?? e.lifecycle.createdAt;
-        // Use dynamic import to avoid circular reference — isActive is in resolution.ts
-        return true; // simplified: show all, let resolution filter at injection time
-      })
       .map((e) => ({
         id: e.id,
         type: e.type,

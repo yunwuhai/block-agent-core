@@ -38,7 +38,7 @@ export const FrequencyConfigSchema = z.object({
 }).optional();
 
 export const RegistryEntrySchema = z.object({
-  type: z.enum(["custom", "hook-output", "file", "template"]),
+  type: z.enum(["custom", "file", "template"]),
   description: z.string(),
   content: z.string().optional(),
   filePath: z.string().optional(),
@@ -53,29 +53,12 @@ export const RegistryEntrySchema = z.object({
 
 export type RegistryEntryInput = z.infer<typeof RegistryEntrySchema>;
 
-// --- Hook configuration (TypeScript-based, multi-script, per-tool hooks) ---
-
-export const ToolHookSchema = z.object({
-  before: z.array(z.string()).optional(),
-  after: z.array(z.string()).optional(),
-});
-
-export const HooksConfigSchema = z.object({
-  before_agent: z.array(z.string()).optional(),
-  after_agent: z.array(z.string()).optional(),
-  tools: z.record(z.string(), ToolHookSchema).optional(),
-  timeoutMs: z.number().positive().optional(),
-});
-
-export type HooksConfig = z.infer<typeof HooksConfigSchema>;
-
 // --- Profile configuration ---
 
 export const ProfileFrontmatterSchema = z.object({
   name: z.string(),
   description: z.string().optional(),
   tools: z.array(z.string()).optional(),
-  hooks: HooksConfigSchema.optional(),
   placeholders: z.record(z.string(), z.string()).optional(),
   registry: z.array(RegistryEntrySchema).optional(),
 });

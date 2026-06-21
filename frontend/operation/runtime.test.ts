@@ -83,7 +83,7 @@ describe("Runtime runner", () => {
       params: { profile: "test-profile", task: "turn 1" },
     });
 
-    // Manually inject a slot into the slot engine (simulating hook output)
+    // Manually inject a slot into the slot engine (simulating runtime context output)
     const { setSlot, listSlots, serializeSlots } = await import("../../backend/computation/prompt/engine.ts");
     setSlot("test-slot-x", "persisted content", 0, -1);
     expect(listSlots().has("test-slot-x")).toBe(true);

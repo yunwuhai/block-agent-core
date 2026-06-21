@@ -1,8 +1,7 @@
-import { readFile, readdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   ProfileFrontmatterSchema,
-  type ProfileFrontmatter,
   type ProfileDefinition,
 } from "./schema.ts";
 

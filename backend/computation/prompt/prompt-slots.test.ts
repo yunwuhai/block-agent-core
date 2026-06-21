@@ -13,7 +13,6 @@ import {
   getEventLog,
   reset,
   expireStaleSlots,
-  clearHookSlots,
   serializeSlots,
   deserializeSlots,
   registerPlaceholder,
@@ -93,15 +92,6 @@ describe("Prompt slots engine", () => {
     expect(expired).not.toContain("persistent");
     expect(listSlots().has("fast")).toBe(false);
     expect(listSlots().has("persistent")).toBe(true);
-  });
-
-  it("clearHookSlots removes hook_ prefixed slots but preserves others", () => {
-    setSlot("hook_before_agent_worker", "hook output");
-    setSlot("mySlot", "user data");
-
-    clearHookSlots();
-    expect(listSlots().has("hook_before_agent_worker")).toBe(false);
-    expect(listSlots().has("mySlot")).toBe(true);
   });
 
   it("setOnceSlot accepts optional TTL", () => {

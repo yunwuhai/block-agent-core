@@ -7,7 +7,7 @@
 | L1 Doc | Summary |
 |--------|---------|
 | `storage-handoff-store.md` | Defines `HandoffBlock` (run metadata, summary, files touched, tool usage, artifacts, block context) and `writeHandoff()` which assembles a rich `.handoff.md` markdown document from a `RunDirectory` + `HandoffBlock`. |
-| `storage-transcript-projector.md` | Defines `TranscriptView` (markdown string) and `buildTranscript()` / `buildJsonTranscript()` — reads events via `readEvents()` from the event log, formats each event variant (`run_start`, `tool_call`, `hook_exec`, `policy_block`, etc.) as markdown sections, and returns a readable transcript. |
+| `storage-transcript-projector.md` | Defines `TranscriptView` (markdown string) and `buildTranscript()` / `buildJsonTranscript()` — reads events via `readEvents()` from the event log, formats each event variant (`run_start`, `tool_call`, `policy_block`, etc.) as markdown sections, and returns a readable transcript. |
 
 ## Intra-Module Relationships
 

@@ -32,7 +32,7 @@ Tests for `evaluate()` against a `MergedPolicy`. The shared fixture (lines 25–
 | blocks denied env var | 76 | `envVar: "SECRET_KEY"` matches env deny list |
 | blocks nested subagent calls | 82 | `isNestedSubagent: true` with tool `efficiency_subagent` → blocked even though tool is in list |
 | allows everything when no policy | 93 | Null policy → `allowed: true` unconditionally |
-| extracts mkdir paths | 98 | `mkdir novel-writer/test` → path check against `novel-writer/**` |
+| extracts mkdir paths | 98 | `mkdir project/test` → path check against `project/**` |
 | extracts mv paths | 104 | `mv old new` → both paths checked against policy |
 | extracts touch paths | 109 | `touch foo.txt` → path check against `foo.txt` |
 | extracts cp paths | 114 | `cp src/file dest/` → both paths checked |

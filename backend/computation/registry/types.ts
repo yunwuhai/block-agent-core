@@ -14,7 +14,7 @@
 // ---------------------------------------------------------------------------
 
 /** Discriminated union tag for entry source type. */
-export type EntryType = "custom" | "hook-output" | "file" | "template";
+export type EntryType = "custom" | "file" | "template";
 
 /**
  * Lifecycle determines *when* an entry is active (can be scheduled/injected).
@@ -59,8 +59,7 @@ export interface FrequencyConfig {
 /**
  * A single prompt registry entry.
  *
- * For `type: "custom"` — user-created, content loaded from `filePath` on demand.
- * For `type: "hook-output"` — auto-created by hook scripts, `content` stored inline.
+ * For `type: "custom"` — user-created inline content or content loaded from `filePath` on demand.
  * For `type: "file"` — bound to `{{name}}` placeholder, content loaded from `filePath`.
  * For `type: "template"` — a reference to another template entry, expanded at schedule time.
  */
@@ -74,7 +73,7 @@ export interface RegistryEntry {
    * Allows the LLM to decide which entries to schedule without loading full content.
    */
   readonly description: string;
-  /** Inline prompt text. Used for `hook-output` type. Mutually exclusive with `filePath`. */
+  /** Inline prompt text. Mutually exclusive with `filePath`. */
   readonly content?: string;
   /** Absolute or relative path to the content file. Used for `custom` and `file` types. */
   readonly filePath?: string;
@@ -100,7 +99,7 @@ export interface RegistryEntry {
   /** Frequency caps — controls how often the entry can be injected. */
   readonly frequency?: FrequencyConfig;
   /** Who created this entry (for audit/debugging). */
-  readonly createdBy: "user" | "hook" | "system";
+  readonly createdBy: "user" | "system";
   /** Unix ms when the entry was first registered. */
   readonly createdAt: number;
   /** Unix ms when the entry was last updated. */

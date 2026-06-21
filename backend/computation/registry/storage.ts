@@ -26,8 +26,13 @@ import type {
   SlidingWindowState,
   EntryType,
   LifecycleConfig,
-  FrequencyConfig,
 } from "./types.ts";
+
+type RegistryEntryInput = Omit<RegistryEntry, "id" | "createdAt" | "updatedAt" | "tags" | "priority" | "lifecycle"> & {
+  readonly tags?: readonly string[];
+  readonly priority?: number;
+  readonly lifecycle?: Partial<LifecycleConfig>;
+};
 
 // ---------------------------------------------------------------------------
 // SlidingWindowCounter
@@ -158,11 +163,7 @@ export class RegistryStorage {
    *
    * @returns The generated entry ID.
    */
-  register(raw: Omit<RegistryEntry, "id" | "createdAt" | "updatedAt"> & {
-    readonly tags?: readonly string[];
-    readonly priority?: number;
-    readonly lifecycle?: Partial<LifecycleConfig>;
-  }): string {
+  register(raw: RegistryEntryInput): string {
     const now = Date.now();
     const id = randomUUID();
 
@@ -201,21 +202,9 @@ export class RegistryStorage {
    * createdBy, and group. This prevents frontmatter-based entries from
    * being duplicated every time a new run re-processes the same profile.
    *
-   * Hook-output entries (createdBy === "hook") are NEVER deduplicated —
-   * each hook invocation produces a unique observation.
-   *
    * @returns The existing entry's ID if deduplicated, or the new ID.
    */
-  registerIfNew(raw: Omit<RegistryEntry, "id" | "createdAt" | "updatedAt"> & {
-    readonly tags?: readonly string[];
-    readonly priority?: number;
-    readonly lifecycle?: Partial<LifecycleConfig>;
-  }): string {
-    // Hook entries are always unique — skip dedup
-    if (raw.createdBy === "hook") {
-      return this.register(raw);
-    }
-
+  registerIfNew(raw: RegistryEntryInput): string {
     // Search for an equivalent existing entry
     for (const existing of this.idIndex.values()) {
       if (
