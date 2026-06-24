@@ -14,12 +14,6 @@ The COLLECT step does not surface unresolved capability names — if `findByCapa
 **Affected**: `backend/core/pipeline.ts` COLLECT step
 **Severity**: Low (caller can compare request vs mounted to detect gaps)
 
-### 3. Legacy registry/ and prompt/ modules still in codebase
-Full migration to `core/` + `runtime/` is designed but legacy code has not been removed. Two parallel implementations exist.
-
-**Affected**: `backend/computation/registry/` and `backend/computation/prompt/`
-**Severity**: Medium (maintenance burden, confusion risk)
-
 ## Resolved Issues
 
 | Issue | Resolution |
@@ -28,3 +22,4 @@ Full migration to `core/` + `runtime/` is designed but legacy code has not been 
 | Registry I/O mixed with logic | Split into core/ (algorithm) + runtime/ (I/O) |
 | Tool simulator as standalone module | Merged into pipeline + MountController |
 | No content-addressed dedup | `generateEntryId()` based on SHA-256 content hash |
+| Legacy registry and prompt modules still in codebase | Removed in project compaction — `computation/registry/` and `computation/prompt/` deleted |

@@ -175,7 +175,7 @@ export type Action =
  * Controller for scheduling and unscheduling registry entries during a run.
  *
  * The RunLifecycle delegates `schedule` and `unschedule` actions to this
- * abstraction.  The existing {@link import("../computation/registry/orchestration.ts").ScheduleOrchestrator}
+ * abstraction.  The {@link import("./actions.ts").MountController} class
  * implements this contract.
  */
 export interface MountController {
