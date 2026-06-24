@@ -31,8 +31,7 @@ ENTRY (backend/entry/)
         └── output.ts        — handoff + transcript formatting
   │
   ├── STORAGE (backend/storage/) — event log + run directories
-  ├── INPUT (backend/input/) — profile/config loading + Zod schemas
-  └── POLICY (backend/computation/policy/) — minimal permission evaluation
+  └── INPUT (backend/input/) — profile loading + Zod schemas
 ```
 
 ## Primary Execution Flow

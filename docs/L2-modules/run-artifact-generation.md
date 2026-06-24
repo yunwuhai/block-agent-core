@@ -6,8 +6,8 @@
 
 | L1 Doc | Summary |
 |--------|---------|
-| `storage-handoff-store.md` | Defines `HandoffBlock` (run metadata, summary, files touched, tool usage, artifacts, block context) and `writeHandoff()` which assembles a rich `.handoff.md` markdown document from a `RunDirectory` + `HandoffBlock`. |
-| `storage-transcript-projector.md` | Defines `TranscriptView` (markdown string) and `buildTranscript()` / `buildJsonTranscript()` — reads events via `readEvents()` from the event log, formats each event variant (`run_start`, `tool_call`, `policy_block`, etc.) as markdown sections, and returns a readable transcript. |
+| `storage-run-artifacts.md` | Defines `HandoffBlock` (run metadata, summary, files touched, tool usage, artifacts, block context) and `writeHandoff()` which assembles a rich `.handoff.md` markdown document from a `RunDirectory` + `HandoffBlock`. |
+| `storage-run-artifacts.md` (via `buildHandoff`/`buildTranscript`) | Defines `TranscriptView` (markdown string) and `buildTranscript()` / `buildJsonTranscript()` — reads events via `readEvents()` from the event log, formats each event variant (`run_start`, `tool_call`, `policy_block`, etc.) as markdown sections, and returns a readable transcript. |
 
 ## Intra-Module Relationships
 
@@ -19,8 +19,8 @@
 
 | Depends on (L1 doc) | Used by | How used |
 |---------------------|---------|----------|
-| `storage-event-log.md` | `storage-handoff-store.md` | Imports `RunDirectory` type — `writeHandoff()` receives a `RunDirectory` to resolve the `handoffPath`. |
-| `storage-event-log.md` | `storage-transcript-projector.md` | Imports `EventEntry`, `ToolLogEntry`, `RunDirectory` types; calls `readEvents(run)` to get raw events for transcript formatting. |
+| `storage-event-log.md` | `storage-run-artifacts.md` | Imports `RunDirectory` type — `writeHandoff()` receives a `RunDirectory` to resolve the `handoffPath`. |
+| `storage-event-log.md` | `storage-run-artifacts.md` (via `buildHandoff`/`buildTranscript`) | Imports `EventEntry`, `ToolLogEntry`, `RunDirectory` types; calls `readEvents(run)` to get raw events for transcript formatting. |
 
 ## Physical Location
 
@@ -35,5 +35,5 @@
 
 - Handoff includes collapsible `<details>` sections for raw final output, allowing machine consumers to parse structured fields while keeping the document compact.
 - Transcript truncates tool output to `maxOutputLength` chars (configurable via `TranscriptOptions`); pass `-1` for unlimited.
-- Re-exported types (`EventEntry`, `ToolLogEntry`, `RunDirectory`) from `storage-transcript-projector.md` exist for consumer convenience — the canonical definitions live in `storage-event-log.md`.
+- Re-exported types (`EventEntry`, `ToolLogEntry`, `RunDirectory`) from `storage-run-artifacts.md` (via `buildHandoff`/`buildTranscript`) exist for consumer convenience — the canonical definitions live in `storage-event-log.md`.
 - The `backend/storage/mod.ts` barrel (`storage-mod.md`) re-exports `writeHandoff`, `HandoffBlock`, `buildTranscript`, `buildJsonTranscript`, `TranscriptView`, and `TranscriptOptions` from the output layer for compatibility.

@@ -10,10 +10,10 @@
 
 ## `efficiency_subagent` Flow
 
-1. Reset prompt engine state.
+1. Reset prompt state.
 2. Validate raw params with `ToolParamsSchema`.
 3. Resolve `cwd` from host context.
-4. Call `executeRun({ cwd, params, signal })`.
+4. Call `executeRun({ profile, task, cwd, runId?, actions? })` via `backend/entry/index.ts`.
 5. Return a compact text summary.
 6. Return structured details with run id, status, output, handoff path, and optional transcript path.
 
@@ -21,8 +21,7 @@
 
 | L1 Doc | Used For |
 |---|---|
-| `config-mod.md` | Tool param schema and type. |
-| `runtime-mod.md` | `executeRun()` from `backend/runtime/mod.ts`. |
-| `runtime-prompt-slots-engine.md` | `reset()` before each invocation. |
+| `config-schema.md` | Tool param schema and type. |
+| `runtime-prompt-state.md` | `reset()` before each invocation. |
 
 Lifecycle scripts are not registered by the root entry.

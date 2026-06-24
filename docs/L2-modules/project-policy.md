@@ -6,7 +6,7 @@
 
 | L1 Doc | Summary |
 |--------|---------|
-| `config-project-loader.md` | Single async function `loadProjectPolicy(cwd)` — reads `.pi/efficiency-subagent/config.json`, parses JSON, validates against `ProjectPolicySchema`, returns `ProjectPolicy` on success or `null` for missing/invalid config (null = "allow all"). |
+| `config-schema.md` (project policy schema) | Single async function `loadProjectPolicy(cwd)` — reads `.pi/efficiency-subagent/config.json`, parses JSON, validates against `ProjectPolicySchema`, returns `ProjectPolicy` on success or `null` for missing/invalid config (null = "allow all"). |
 
 ## Intra-Module Relationships
 
