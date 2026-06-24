@@ -21,20 +21,18 @@ The project internally uses the name **better-subagent** and follows an assembly
 ## 开发命令
 
 ```bash
-bun test          # 运行全部测试（当前 132 pass / 0 fail），测试与源文件同目录
+bun test          # 运行全部测试
 tsc --noEmit      # 类型检查
 ```
 
 ## 架构速览
 
 - `backend/core/` — Pure algorithm layer (NO I/O — architectural invariant). Types, Registry, Pipeline, Composer, Capability.
-- `backend/runtime/` — I/O layer. RegistryStore, RunLifecycle, MountController, output formatters.
+- `backend/runtime/` — I/O layer. RegistryStore, RunLifecycle, MountController, output formatters, prompt state.
 - `backend/entry/` — Wiring and public API (executeRun).
 - `backend/storage/` — Event logging and run directory management.
 - `backend/input/` — Profile/config loading and Zod schemas.
 - `backend/computation/policy/` — Minimal permission evaluation.
-- `backend/computation/registry/` — LEGACY registry (being migrated to core/ + runtime/).
-- `backend/computation/prompt/` — LEGACY prompt engine (being migrated to core/composer).
 
 ## 关键约束
 

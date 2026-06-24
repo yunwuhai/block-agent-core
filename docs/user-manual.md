@@ -107,9 +107,8 @@ If you omit `runId`, a new run directory is created at `.pi/subagents/runs/{prof
 **What it does:** Produces `handoff.md` (machine-consumable continuation context) and `transcript.md` (human-readable event log).
 **When to interact:** If you're consuming handoff documents across invocations, or if you need to modify the handoff format. Key exports: `writeHandoff()`, `buildTranscript()`, `buildJsonTranscript()`.
 
-### Prompt Engine (`backend/computation/prompt/engine.ts`)
-**What it does:** Manages dynamic prompt content through three mechanisms: registry-based composition (primary), `{{name}}` placeholder replacement (legacy), and named slot prepending by priority (legacy). Maintains module-level mutable state with serialization support.
-**When to interact:** If you need to understand prompt assembly or continuation state. Key exports: `setSlot()`, `pushSlot()`, `popSlot()`, `setOnceSlot()`, `registerPlaceholder()`, `renderPromptWithRegistry()`, `serializeSlots()`, `deserializeSlots()`.
+### Prompt State (`backend/runtime/prompt-state.ts`)
+Manages `{{name}}` placeholder bindings and operation event log. Used by RunLifecycle when registering profile placeholders and recording slot mutations.
 
 ### Policy Engine (`policy/`)
 **What it does:** Merges multiple `PolicyEntry` sources into one `MergedPolicy`, then evaluates tool invocations across 7 dimensions: tool names, file paths (with glob support), bash commands, network domains/ports, env vars, nested subagent calls, and bash redirect targets.
