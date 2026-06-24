@@ -1,138 +1,125 @@
 import { describe, expect, it } from "bun:test";
 import { evaluate } from "./evaluator.ts";
-import { mergePolicies } from "./merge.ts";
-import type { MergedPolicy } from "./mod.ts";
+import type { Action, Policy } from "./types.ts";
 
-describe("Policy merge", () => {
-  it("merges multiple policy layers", () => {
-    const merged = mergePolicies(
-      { tools: ["read"] },
-      { tools: ["bash"], paths: ["src/**"] },
-    );
-    expect(merged.tools).toContain("read");
-    expect(merged.tools).toContain("bash");
-    expect(merged.paths).toContain("src/**");
+describe("Policy evaluator — tool whitelist", () => {
+  const policy: Policy = { allowTools: ["read", "bash"] };
+
+  it("allows tool in allowTools", () => {
+    const action: Action = { type: "read" };
+    expect(evaluate(action, policy).allowed).toBe(true);
   });
 
-  it("returns null fields for empty input", () => {
-    const merged = mergePolicies();
-    expect(merged.tools).toBeNull();
-    expect(merged.paths).toBeNull();
+  it("blocks tool not in allowTools", () => {
+    const action: Action = { type: "write" };
+    const result = evaluate(action, policy);
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain("allowTools");
   });
 });
 
-describe("Policy evaluator", () => {
-  const fullPolicy: MergedPolicy = {
-    tools: ["read", "bash", "efficiency_subagent"],
-    paths: ["src/**", "README.md"],
-    bash: { deny: ["rm", "sudo"], allow: ["git"] },
-    network: { allow: false, allowedDomains: ["api.example.com"], deniedDomains: ["evil.com"] },
-    env: { deny: ["SECRET_KEY"] },
-  };
+describe("Policy evaluator — whitelist vs blacklist modes", () => {
+  it("blocks when allowTools is specified and tool is absent (whitelist mode)", () => {
+    const policy: Policy = { allowTools: ["read"] };
+    expect(evaluate({ type: "bash" }, policy).allowed).toBe(false);
+  });
 
-  it("allows tool in list", () => {
-    const result = evaluate({ toolName: "read" }, fullPolicy);
+  it("allows when allowTools is not specified (blacklist mode)", () => {
+    const policy: Policy = {};
+    expect(evaluate({ type: "bash" }, policy).allowed).toBe(true);
+  });
+});
+
+describe("Policy evaluator — path allow/deny", () => {
+  it("allows path in allowPaths", () => {
+    const policy: Policy = { allowPaths: ["src/**"] };
+    expect(evaluate({ type: "read", path: "src/main.ts" }, policy).allowed).toBe(true);
+  });
+
+  it("blocks path not in allowPaths", () => {
+    const policy: Policy = { allowPaths: ["src/**"] };
+    const result = evaluate({ type: "read", path: "secret.txt" }, policy);
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain("allowPaths");
+  });
+
+  it("denyPaths overrides allowPaths", () => {
+    const policy: Policy = { allowPaths: ["src/**"], denyPaths: ["src/secret/**"] };
+    expect(evaluate({ type: "read", path: "src/main.ts" }, policy).allowed).toBe(true);
+    expect(evaluate({ type: "read", path: "src/secret/key.ts" }, policy).allowed).toBe(false);
+  });
+
+  it("denyPath alone blocks even without allowPaths", () => {
+    const policy: Policy = { denyPaths: ["/tmp/**"] };
+    const result = evaluate({ type: "bash", path: "/tmp/foo" }, policy);
+    expect(result.allowed).toBe(false);
+    expect(result.rule).toBe("denyPaths");
+  });
+
+  it("allows any path when allowPaths is not set and no denyPaths match", () => {
+    const policy: Policy = {};
+    expect(evaluate({ type: "read", path: "anything.txt" }, policy).allowed).toBe(true);
+  });
+});
+
+describe("Policy evaluator — bash rules", () => {
+  it("denyCommands blocks matching command", () => {
+    const policy: Policy = { bashRules: [{ denyCommands: ["rm"] }] };
+    const result = evaluate({ type: "bash", command: "rm -rf /" }, policy);
+    expect(result.allowed).toBe(false);
+    expect(result.rule).toBe("bashRules.denyCommands");
+  });
+
+  it("allowCommands allows matching command", () => {
+    const policy: Policy = { bashRules: [{ allowCommands: ["git"] }] };
+    expect(evaluate({ type: "bash", command: "git status" }, policy).allowed).toBe(true);
+  });
+
+  it("blocks command not in allowCommands", () => {
+    const policy: Policy = { bashRules: [{ allowCommands: ["git"] }] };
+    const result = evaluate({ type: "bash", command: "rm file" }, policy);
+    expect(result.allowed).toBe(false);
+  });
+
+  it("denyPatterns blocks via glob", () => {
+    const policy: Policy = { bashRules: [{ denyPatterns: ["sudo *"] }] };
+    const result = evaluate({ type: "bash", command: "sudo rm -rf /" }, policy);
+    expect(result.allowed).toBe(false);
+  });
+
+  it("allowPatterns allows via glob", () => {
+    const policy: Policy = { bashRules: [{ allowPatterns: ["git *"] }] };
+    expect(evaluate({ type: "bash", command: "git log" }, policy).allowed).toBe(true);
+  });
+});
+
+describe("Policy evaluator — capabilities", () => {
+  it("blocks denied capability", () => {
+    const policy: Policy = { denyCapabilities: ["admin"] };
+    const result = evaluate({ type: "capability", env: "admin" }, policy);
+    expect(result.allowed).toBe(false);
+  });
+
+  it("allows only listed capabilities when allowCapabilities set", () => {
+    const policy: Policy = { allowCapabilities: ["read-only"] };
+    expect(evaluate({ type: "capability", env: "read-only" }, policy).allowed).toBe(true);
+    const result = evaluate({ type: "capability", env: "admin" }, policy);
+    expect(result.allowed).toBe(false);
+  });
+});
+
+describe("Policy evaluator — subagent control", () => {
+  it("blocks subagent calls when allowSubagent is false", () => {
+    const policy: Policy = { allowSubagent: false };
+    const result = evaluate({ type: "subagent" }, policy);
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain("subagent");
+  });
+});
+
+describe("Policy evaluator — null policy", () => {
+  it("allows everything when policy is null", () => {
+    const result = evaluate({ type: "anything" }, null);
     expect(result.allowed).toBe(true);
-  });
-
-  it("blocks tool not in list", () => {
-    const result = evaluate({ toolName: "delete" }, fullPolicy);
-    expect(result.allowed).toBe(false);
-    expect(result.reason).toContain("not in allowed list");
-  });
-
-  it("allows file in path", () => {
-    const result = evaluate({ toolName: "read", filePath: "src/foo.ts" }, fullPolicy);
-    expect(result.allowed).toBe(true);
-  });
-
-  it("blocks file not in path", () => {
-    const result = evaluate({ toolName: "read", filePath: "secret.env" }, fullPolicy);
-    expect(result.allowed).toBe(false);
-    expect(result.reason).toContain("not allowed");
-  });
-
-  it("denies rm command", () => {
-    const result = evaluate({ toolName: "bash", command: "rm -rf /" }, fullPolicy);
-    expect(result.allowed).toBe(false);
-    expect(result.reason).toContain("denied");
-  });
-
-  it("allows git command in allowlist", () => {
-    const result = evaluate({ toolName: "bash", command: "git status" }, fullPolicy);
-    expect(result.allowed).toBe(true);
-  });
-
-  it("blocks network to unauthorized domain", () => {
-    const result = evaluate({ toolName: "read", url: "https://evil.com/data" }, fullPolicy);
-    expect(result.allowed).toBe(false);
-  });
-
-  it("allows network to allowed domain", () => {
-    const result = evaluate({ toolName: "read", url: "https://api.example.com/v1" }, fullPolicy);
-    expect(result.allowed).toBe(true);
-  });
-
-  it("blocks denied env var", () => {
-    const result = evaluate({ toolName: "read", envVar: "SECRET_KEY" }, fullPolicy);
-    expect(result.allowed).toBe(false);
-    expect(result.reason).toContain("denied");
-  });
-
-  it("blocks nested subagent calls", () => {
-    const result = evaluate({ toolName: "efficiency_subagent", isNestedSubagent: true }, {
-      tools: ["read"],
-      paths: null,
-      bash: null,
-      network: null,
-      env: null,
-    });
-    expect(result.allowed).toBe(false);
-  });
-
-  it("allows everything when no policy", () => {
-    const result = evaluate({ toolName: "anything" }, null);
-    expect(result.allowed).toBe(true);
-  });
-
-  it("extracts mkdir paths for policy check", () => {
-    const policy: MergedPolicy = { tools: null, paths: ["project/**"], bash: null, network: null, env: null };
-    expect(evaluate({ toolName: "bash", command: "mkdir project/test" }, policy).allowed).toBe(true);
-    expect(evaluate({ toolName: "bash", command: "mkdir /tmp/forbidden" }, policy).allowed).toBe(false);
-  });
-
-  it("extracts mv paths for policy check", () => {
-    const policy: MergedPolicy = { tools: null, paths: ["old", "new"], bash: null, network: null, env: null };
-    expect(evaluate({ toolName: "bash", command: "mv old new" }, policy).allowed).toBe(true);
-  });
-
-  it("extracts touch paths for policy check", () => {
-    const policy: MergedPolicy = { tools: null, paths: ["foo.txt"], bash: null, network: null, env: null };
-    expect(evaluate({ toolName: "bash", command: "touch foo.txt" }, policy).allowed).toBe(true);
-  });
-
-  it("extracts cp paths for policy check", () => {
-    const policy: MergedPolicy = { tools: null, paths: ["src/**", "dest/**"], bash: null, network: null, env: null };
-    expect(evaluate({ toolName: "bash", command: "cp src/file dest/" }, policy).allowed).toBe(true);
-  });
-
-  it("blocks bash path via excludePaths (deny wins)", () => {
-    const policy: MergedPolicy = { tools: null, paths: ["excluded-dir"], excludePaths: ["excluded-dir"], bash: null, network: null, env: null };
-    const result = evaluate({ toolName: "bash", command: "mkdir excluded-dir" }, policy);
-    expect(result.allowed).toBe(false);
-    expect(result.reason).toContain("excludePaths");
-  });
-
-  it("skips path extraction for flag-only commands", () => {
-    const policy: MergedPolicy = { tools: null, paths: ["project/**"], bash: null, network: null, env: null };
-    expect(evaluate({ toolName: "bash", command: "echo -n" }, policy).allowed).toBe(true);
-  });
-
-  it("extracts redirect target paths", () => {
-    const allowedPolicy: MergedPolicy = { tools: null, paths: ["/tmp/**"], bash: null, network: null, env: null };
-    expect(evaluate({ toolName: "bash", command: "echo>/tmp/out.txt" }, allowedPolicy).allowed).toBe(true);
-
-    const blockedPolicy: MergedPolicy = { tools: null, paths: ["project/**"], bash: null, network: null, env: null };
-    expect(evaluate({ toolName: "bash", command: "echo>/tmp/out.txt" }, blockedPolicy).allowed).toBe(false);
   });
 });

@@ -1,5 +1,7 @@
 # AGENTS.md — efficiency-subagent
 
+The project internally uses the name **better-subagent** and follows an assembly metaphor: context is assembled from a Registry of reusable Entry objects by a Pipeline, then rendered by a Composer.
+
 ## 核心规则
 
 ### 读：先查文档，不读源码
@@ -25,14 +27,14 @@ tsc --noEmit      # 类型检查
 
 ## 架构速览
 
-```
-frontend/operation/   — 编排器 + 工具模拟器（操作层）
-backend/input/        — Zod schema + profile 加载（输入层）
-backend/output/       — handoff + transcript 生成（输出层）
-backend/storage/      — 运行目录 + JSONL 持久化（存储层）
-backend/computation/  — policy/prompt/registry（计算层）
-index.ts              — PI 扩展入口
-```
+- `backend/core/` — Pure algorithm layer (NO I/O — architectural invariant). Types, Registry, Pipeline, Composer, Capability.
+- `backend/runtime/` — I/O layer. RegistryStore, RunLifecycle, MountController, output formatters.
+- `backend/entry/` — Wiring and public API (executeRun).
+- `backend/storage/` — Event logging and run directory management.
+- `backend/input/` — Profile/config loading and Zod schemas.
+- `backend/computation/policy/` — Minimal permission evaluation.
+- `backend/computation/registry/` — LEGACY registry (being migrated to core/ + runtime/).
+- `backend/computation/prompt/` — LEGACY prompt engine (being migrated to core/composer).
 
 ## 关键约束
 
@@ -40,6 +42,7 @@ index.ts              — PI 扩展入口
 - 禁止 `as any`、`@ts-ignore`、`@ts-expect-error`
 - 测试文件与源文件同目录（如 `backend/computation/registry/registry.test.ts`）
 - PI 扩展通过 symlink 部署：`ln -s $(pwd) ~/.pi/agent/extensions/efficiency-subagent`
+- **Core purity**: `backend/core/` modules must never import `fs`, `path`, or perform I/O. The only permitted external import is `node:crypto` for content-addressed entry ID generation. This is an architectural invariant enforced by code review.
 
 ## 不要做的事
 

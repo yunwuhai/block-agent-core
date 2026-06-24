@@ -22,7 +22,7 @@
 | L1 Doc | Used For |
 |---|---|
 | `config-mod.md` | Tool param schema and type. |
-| `runtime-mod.md` | `executeRun()`. |
+| `runtime-mod.md` | `executeRun()` from `backend/runtime/mod.ts`. |
 | `runtime-prompt-slots-engine.md` | `reset()` before each invocation. |
 
 Lifecycle scripts are not registered by the root entry.

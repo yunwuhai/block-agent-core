@@ -1,14 +1,13 @@
 # L2 Module: Runtime Core
 
-**Purpose:** Operation-layer execution lifecycle for subagent runs. Ties together profile loading, policy enforcement, prompt rendering, tool simulation, durable event/session persistence, transcript generation, and structured handoff output.
+**Purpose:** Backend cross-layer execution lifecycle for subagent runs. Ties together profile loading, dynamic context scheduling (scheduleEntries/unscheduleEntries), policy enforcement, prompt rendering, tool simulation, durable event/session persistence, transcript generation, and structured handoff output.
 
 ## Member Files
 
 | L1 Doc | Source File | Role |
 |---|---|---|
-| `runtime-orchestrator.md` | `frontend/operation/orchestrator.ts` | Run lifecycle orchestrator: run identity, run dir, profile/policy load, registry wiring, prompt render, action loop, artifacts, persistence. |
-| `runtime-tool-simulator.md` | `frontend/operation/tool-simulator.ts` | Per-action tool simulation: policy evaluation, tool call/result logging, retry, slot mutation logging. |
-| `runtime-mod.md` | `frontend/operation/mod.ts` | Barrel re-exporting orchestrator and tool simulator API. |
+| `runtime-orchestrator.md` | `backend/runtime/orchestrator.ts` | Run lifecycle orchestrator: run identity, run dir, profile/policy load, registry wiring, schedule/unschedule processing, prompt render, action loop (including tool simulation + retry), frequency persistence, artifacts. |
+| `runtime-mod.md` | `backend/runtime/mod.ts` | Barrel re-exporting `executeRun`. |
 
 ## Flow
 
@@ -17,8 +16,11 @@ index.ts
   -> executeRun()
     -> load profile + project policy
     -> setRegistry() + register profile prompt entries
+    -> process scheduleEntries / unscheduleEntries actions
+         (before prompt: mutate orchestrator schedule state)
     -> renderPromptWithRegistry()
-    -> execute action loop
+         -> ToC table + injected (scheduled) entries + placeholder resolution
+    -> execute action loop (schedule/unschedule actions filtered out)
       -> executeWithRetry()
         -> simulateToolInteraction()
           -> evaluate(policy)
@@ -30,12 +32,19 @@ index.ts
 ## Public API
 
 - `executeRun(ctx): Promise<RunResult>`
-- `executeWithRetry(...)`
-- `simulateToolInteraction(...)`
-- Types: `RunContext`, `RunResult`, `ToolInteractionResult`
+
+## Dynamic Context Scheduling
+
+Action types `scheduleEntries` and `unscheduleEntries` enable per-run context variation:
+
+- **`scheduleEntries`**: `{ toolName: "scheduleEntries", scheduleTags: ["coding"], scheduleIds: [...], scheduleGroup: "..." }` — injects specific registry entries into this run's prompt.
+- **`unscheduleEntries`**: `{ toolName: "unscheduleEntries", unscheduleTags: ["api"], unscheduleIds: [...] }` — removes entries from the schedule (useful when combined with broad-tag scheduling).
+
+These actions are processed **before prompt rendering** and filtered out of the tool action list. Each logs a durable `schedule_entries` / `unschedule_entries` event. Frequency limits are enforced across runs via shared `registry-calls.jsonl`.
 
 ## Notes
 
-- Lifecycle script dispatch was removed from this module. Action execution is now controlled by explicit `actions` params and policy evaluation.
-- Prompt/context loading is handled by registry and placeholder frontmatter, not lifecycle scripts.
-- Frontend display events were removed; runtime status is represented by durable JSONL events plus generated transcript/handoff artifacts.
+- Tool simulation and retry logic (`simulateToolInteraction`, `executeWithRetry`) lives inline in `backend/runtime/orchestrator.ts` as internal functions — no separate file.
+- Lifecycle script dispatch was removed. Action execution is controlled by explicit `actions` params and policy evaluation.
+- Prompt/context loading is handled by registry scheduling and placeholder frontmatter.
+- Frequency counters persist in a shared `registry-calls.jsonl` (loaded by `RegistryStorage.load()`).

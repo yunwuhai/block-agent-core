@@ -11,7 +11,6 @@
  *   reset()                             — 清除所有状态（主要用于测试）
  */
 
-import { readFile } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 

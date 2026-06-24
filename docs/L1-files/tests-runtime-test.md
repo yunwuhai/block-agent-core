@@ -1,10 +1,10 @@
-# L1 — `frontend/operation/runtime.test.ts`
+# L1 — `backend/runtime/runtime.test.ts`
 
 **Lines:** 117
 
 ## Purpose
 
-Integration tests for the runtime runner (`executeRun` in `frontend/operation/orchestrator.ts`) — the core orchestration function that drives profile+task execution, permission enforcement, action sequences, durable event logging, and prompt-slot persistence.
+Integration tests for the runtime runner (`executeRun` in `backend/runtime/orchestrator.ts`) — the core orchestration function that drives profile+task execution, permission enforcement, action sequences, durable event logging, and prompt-slot persistence.
 
 ## Test Setup
 

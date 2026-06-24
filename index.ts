@@ -6,18 +6,50 @@
  * and transcript generation.
  *
  * Architecture:
- *   frontend/operation/ — profile resolution, child PI process orchestration
- *   backend/input/      — user profile and project config discovery
- *   backend/storage/    — runtime artifact persistence (.pi/subagents/runs)
- *   backend/computation/prompt/ — dynamic prompt slot engine
- *   backend/computation/policy/ — permission schema, merge, and evaluator
- *   tests/     — test harness and scenario coverage
+ *   backend/entry/       — public API facade, dependency wiring (executeRun)
+ *   backend/runtime/     — run lifecycle (RunLifecycle, MountController), prompt state
+ *   backend/core/        — pure algorithm layer (Registry, Pipeline, Composer)
+ *   backend/input/       — profile and config loading
+ *   backend/storage/     — runtime artifact persistence
+ *   backend/computation/policy/ — permission evaluation
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { ToolParamsSchema, type ToolParams } from "./backend/input/mod.ts";
-import { reset as resetSlots } from "./backend/computation/prompt/engine.ts";
-import { executeRun } from "./frontend/operation/mod.ts";
+import { reset } from "./backend/runtime/prompt-state.ts";
+import { executeRun } from "./backend/entry/index.ts";
+
+/**
+ * 将旧的 ActionParams[] 格式转换为后端新的 Action[] 格式。
+ */
+function convertActions(actions: NonNullable<ToolParams["actions"]>): Array<import("./backend/runtime/run.ts").Action> {
+  return actions.map((a) => {
+    if (a.toolName === "scheduleEntries") {
+      return {
+        type: "schedule" as const,
+        ...(a.scheduleTags?.length ? { tags: a.scheduleTags } : {}),
+        ...(a.scheduleIds?.length ? { ids: a.scheduleIds } : {}),
+        ...(a.scheduleGroup ? { group: a.scheduleGroup } : {}),
+      };
+    }
+    if (a.toolName === "unscheduleEntries") {
+      return {
+        type: "unschedule" as const,
+        entryIds: a.unscheduleIds ?? [],
+      };
+    }
+    return {
+      type: "tool_call" as const,
+      tool: a.toolName,
+      args: {
+        ...(a.filePath ? { filePath: a.filePath } : {}),
+        ...(a.command ? { command: a.command } : {}),
+        ...(a.url ? { url: a.url } : {}),
+        ...(a.envVar ? { envVar: a.envVar } : {}),
+      },
+    };
+  });
+}
 
 /**
  * TUI-compatible renderable text — satisfies the PI TUI Box.render contract.
@@ -37,9 +69,10 @@ export default function (pi: ExtensionAPI): void {
     label: "Efficiency Subagent",
     description: [
       "Profile-based subagent invocation with durable sessions and policy control.",
-      "Params: profile (required), task (required), runId (optional), actions (optional action sequence).",
+      "Params: profile (required), task (required), runId (optional), actions (optional action sequence + scheduleEntries/unscheduleEntries).",
       "Every run creates .pi/subagents/runs/<runId>/ artifacts with JSONL facts, tool logs, transcript, and handoff.",
       "Policy enforces tool names, file paths, bash commands, network, env vars, and nested subagent calls.",
+      "scheduleEntries/unscheduleEntries actions inject/remove registry entries per run to control context size.",
     ].join(" "),
     parameters: {
       type: "object",
@@ -53,11 +86,16 @@ export default function (pi: ExtensionAPI): void {
           items: {
             type: "object",
             properties: {
-              toolName: { type: "string", description: "Tool name: read, bash, write, edit" },
+              toolName: { type: "string", description: "Tool name: read, bash, write, edit, scheduleEntries, unscheduleEntries" },
               filePath: { type: "string", description: "File path for read/write/edit" },
               command: { type: "string", description: "Bash command string" },
               url: { type: "string", description: "URL for network fetch" },
               envVar: { type: "string", description: "Environment variable name" },
+              scheduleTags: { type: "array", description: "Tags to schedule for context injection (scheduleEntries)" },
+              scheduleIds: { type: "array", description: "Entry IDs to schedule (scheduleEntries)" },
+              scheduleGroup: { type: "string", description: "Group to schedule all entries from (scheduleEntries)" },
+              unscheduleTags: { type: "array", description: "Tags to remove from context (unscheduleEntries)" },
+              unscheduleIds: { type: "array", description: "Entry IDs to remove from context (unscheduleEntries)" },
             },
             required: ["toolName"],
           },
@@ -65,8 +103,8 @@ export default function (pi: ExtensionAPI): void {
       },
       required: ["profile", "task"],
     },
-    async execute(_toolCallId: string, rawParams: unknown, signal?: AbortSignal, _onUpdate?: unknown, ctx?: ExtensionContext) {
-      resetSlots();
+    async execute(_toolCallId: string, rawParams: unknown, _signal?: AbortSignal, _onUpdate?: unknown, ctx?: ExtensionContext) {
+      reset();
 
       const parseResult = ToolParamsSchema.safeParse(rawParams);
       if (!parseResult.success) {
@@ -88,14 +126,16 @@ export default function (pi: ExtensionAPI): void {
 
       try {
         const result = await executeRun({
+          profile: params.profile,
+          task: params.task,
           cwd,
-          params,
-          ...(signal !== undefined ? { signal } : {}),
+          ...(params.runId !== undefined ? { runId: params.runId } : {}),
+          ...(params.actions !== undefined ? { actions: convertActions(params.actions) } : {}),
         });
 
         const summary = [
           `Efficiency Subagent: ${result.status.toUpperCase()}`,
-          `Run ID: ${result.runId}`,
+          `Run ID: ${result.id}`,
           `Handoff: ${result.handoffPath}`,
           ...(result.transcriptPath !== undefined ? [`Transcript: ${result.transcriptPath}`] : []),
         ].join("\n");
@@ -111,7 +151,7 @@ export default function (pi: ExtensionAPI): void {
               task: params.task,
               exitCode,
               output: result.output,
-              runId: result.runId,
+              runId: result.id,
               status: result.status,
               handoffPath: result.handoffPath,
               ...(result.transcriptPath !== undefined ? { transcriptPath: result.transcriptPath } : {}),

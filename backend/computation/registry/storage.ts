@@ -136,6 +136,25 @@ export class RegistryStorage {
         // Skip malformed lines — best-effort load
       }
     }
+
+    // Restore frequency counters from shared call history
+    if (this.callsPath && existsSync(this.callsPath)) {
+      const callsRaw = await readFile(this.callsPath, "utf-8");
+      const callLines = callsRaw.trim().split("\n").filter(Boolean);
+      for (const line of callLines) {
+        try {
+          const record = JSON.parse(line) as CallRecord;
+          let counter = this.freqCounters.get(record.entryId);
+          if (!counter) {
+            counter = new SlidingWindowCounter();
+            this.freqCounters.set(record.entryId, counter);
+          }
+          counter.record(record.timestamp);
+        } catch {
+          // Skip malformed lines
+        }
+      }
+    }
   }
 
   /**

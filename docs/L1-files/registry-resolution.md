@@ -1,3 +1,9 @@
+> **REORGANIZED:** The registry subsystem has been restructured into a core/runtime split:
+> - **Algorithm layer** moved to `core/` — core/registry.ts, core/pipeline.ts, core/composer.ts
+> - **I/O layer** moved to `runtime/` — runtime/registry-store.ts, runtime/actions.ts
+> See `docs/L1-files/core-*.md` and `docs/L1-files/runtime-*.md` for the current implementations.
+> This file documents the LEGACY module and is retained for reference during migration.
+
 # `registry/resolution.ts` — Prompt Resolution Engine (Layer 2)
 
 **File purpose:** Consumes a `ScheduleState` from Layer 3 and resolves it into an ordered, deduplicated list of `ResolvedEntry` objects ready for prompt injection. Implements a 5-stage pipeline: **Collect → Dedup → Filter → Sort → Load**.

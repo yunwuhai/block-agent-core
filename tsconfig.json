@@ -28,5 +28,5 @@
       ]
     }
   },
-  "include": ["index.ts", "backend/**/*.ts", "frontend/**/*.ts", "*.test.ts"]
+  "include": ["index.ts", "backend/**/*.ts", "*.test.ts"]
 }

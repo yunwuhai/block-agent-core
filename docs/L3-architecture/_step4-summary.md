@@ -8,9 +8,11 @@
 ```
 efficiency-subagent/
 ├── index.ts
-├── frontend/
-│   └── operation/
 ├── backend/
+│   ├── runtime/
+│   │   ├── orchestrator.ts
+│   │   ├── mod.ts
+│   │   └── runtime.test.ts
 │   ├── input/
 │   ├── output/
 │   ├── storage/
@@ -18,12 +20,12 @@ efficiency-subagent/
 │       ├── policy/
 │       ├── prompt/
 │       └── registry/
-└── docs/
+├── docs/
 ```
 
 ## Notes
 
-- `index.ts` remains the PI extension entry point.
-- Runtime orchestration lives in `frontend/operation/`.
-- Input, computation, storage, and output modules live under `backend/`.
-- Lifecycle extension scripts and frontend display rendering were removed after this reorganization; current control flow uses explicit actions, policy evaluation, prompt registry scheduling, and durable run artifacts.
+- `index.ts` remains the PI extension entry point, importing `executeRun` from `backend/runtime/mod.ts`.
+- `backend/runtime/` contains the orchestrator (lifecycle, tool simulation, retry), barrel, and tests. It is a cross-layer coordinator under `backend/`, touching input, computation, storage, and output quadrants.
+- Lifecycle extension scripts and frontend display rendering were removed; current control flow uses explicit actions, policy evaluation, prompt registry scheduling, and durable run artifacts.
+- Originally `frontend/operation/`, renamed to `runtime/` (2026-06-22), then moved under `backend/runtime/` (2026-06-22).

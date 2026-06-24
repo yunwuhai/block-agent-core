@@ -12,18 +12,26 @@ The efficiency-subagent is a profile-based subagent plugin for the PI Coding Age
 
 ## Architecture Overview
 
-The system has 13 functional modules arranged in two layers (Frontend and Backend), with the Backend split into four quadrants:
+The system has 13 functional modules. `index.ts` is the entry point; everything else lives under `backend/` in five sub-layers:
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  FRONTEND (user-facing)                                       │
+│  ENTRY                                                        │
 │  ┌────────────────────────────────────────────────────────┐  │
-│  │ Operation (操作)                                      │  │
-│  │ root-entry (tool registration), runtime-core           │  │
-│  │ action loop and durable artifact coordination          │  │
+│  │ index.ts — root-entry (tool registration)              │  │
 │  └────────────────────────────────────────────────────────┘  │
 ├──────────────────────────────────────────────────────────────┤
-│  BACKEND (data processing)                                    │
+│  BACKEND                                                      │
+│  ┌──────────────┐ ┌──────────────┐ ┌────────┐ ┌────────────┐│
+│  │ runtime/     │ │ input/       │ │ output/│ │computation/ ││
+│  │ (cross-layer │ │ (config,     │ │ (hand- │ │(policy,     ││
+│  │ orchestrator)│ │  profiles,   │ │  off,  │ │ prompt,     ││
+│  │              │ │  policy)     │ │  tran- │ │ registry)   ││
+│  │              │ │              │ │ script)│ │             ││
+│  ├──────────────┴─┴──────────────┴─┴────────┴─┴─────────────┤│
+│  │ storage/ — durable JSONL event/tool/session logs          ││
+│  └───────────────────────────────────────────────────────────┘│
+└──────────────────────────────────────────────────────────────┘
 │  ┌──────────────┐ ┌──────────────┐ ┌────────┐ ┌────────────┐│
 │  │ Input (输入)   │ │ Output (输出) │ │Storage │ │Computation ││
 │  │ configuration │ │ run-artifact │ │(存储)   │ │ (计算)      ││
@@ -35,7 +43,7 @@ The system has 13 functional modules arranged in two layers (Frontend and Backen
 └──────────────────────────────────────────────────────────────┘
 ```
 
-**Frontend Operation** handles tool registration (root-entry) and the 17-phase execution lifecycle (runtime-core). The runtime-core orchestrator is the central hub, but it crosses into backend quadrants, which is a documented architectural concern.
+**Entry** (`index.ts`) registers the `efficiency_subagent` tool. **Backend runtime** (`backend/runtime/orchestrator.ts`) handles the execution lifecycle. It is a cross-layer orchestrator that touches input, computation, storage, and output quadrants. It also supports per-run dynamic context scheduling via `scheduleEntries`/`unscheduleEntries` actions, with frequency limits enforced across runs.
 
 **Backend Input** loads and validates configuration. Three modules: configuration (Zod schemas), profile-management (YAML frontmatter parser for `.profiles/*.md`), and project-policy (JSON loader for `.pi/efficiency-subagent/config.json`).
 
@@ -99,7 +107,7 @@ If you omit `runId`, a new run directory is created at `.pi/subagents/runs/{prof
 **What it does:** Produces `handoff.md` (machine-consumable continuation context) and `transcript.md` (human-readable event log).
 **When to interact:** If you're consuming handoff documents across invocations, or if you need to modify the handoff format. Key exports: `writeHandoff()`, `buildTranscript()`, `buildJsonTranscript()`.
 
-### Prompt Engine (`runtime/prompt-slots/engine.ts`)
+### Prompt Engine (`backend/computation/prompt/engine.ts`)
 **What it does:** Manages dynamic prompt content through three mechanisms: registry-based composition (primary), `{{name}}` placeholder replacement (legacy), and named slot prepending by priority (legacy). Maintains module-level mutable state with serialization support.
 **When to interact:** If you need to understand prompt assembly or continuation state. Key exports: `setSlot()`, `pushSlot()`, `popSlot()`, `setOnceSlot()`, `registerPlaceholder()`, `renderPromptWithRegistry()`, `serializeSlots()`, `deserializeSlots()`.
 
@@ -107,8 +115,8 @@ If you omit `runId`, a new run directory is created at `.pi/subagents/runs/{prof
 **What it does:** Merges multiple `PolicyEntry` sources into one `MergedPolicy`, then evaluates tool invocations across 7 dimensions: tool names, file paths (with glob support), bash commands, network domains/ports, env vars, nested subagent calls, and bash redirect targets.
 **When to interact:** If you're configuring sandbox restrictions for a profile, or if you're debugging a "blocked by policy" error. Key exports: `mergePolicies()`, `evaluate()`.
 
-### Runtime Core (`runtime/runner.ts`)
-**What it does:** The central orchestrator. Executes runs: loads profiles, merges policies, renders prompts, runs the action loop with retry logic, builds transcripts and handoffs, persists state. Also handles run ID resolution and continuation consistency checks.
+### Runtime Core (`backend/runtime/orchestrator.ts`)
+**What it does:** The central orchestrator. Executes runs: loads profiles, merges policies, renders prompts, runs the action loop with retry logic and tool simulation, builds transcripts and handoffs, persists state. Also handles run ID resolution and continuation consistency checks.
 **When to interact:** If you're tracing the execution lifecycle, adding new lifecycle phases, or debugging why a run failed. Key export: `executeRun(ctx)`.
 
 ### Root Entry (`index.ts`)

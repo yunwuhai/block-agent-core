@@ -2,8 +2,6 @@
 
 Functional module decomposition based on coupling analysis of `config/` and `storage/` L1 file documentation. Each module groups files that share types, call each other, and serve a common purpose.
 
-> **Step 4 Update (2026-06-21):** No new modules were created by the runtime-core split — the reorganization was fully deferred. Frontend display was later removed for redesign, leaving 13 active L2 modules. The `runtime-core` boundary violation documented in [L3/_bugs.md](../L3-architecture/_bugs.md) is still active.
-
 ## Modules
 
 | # | Module | Files | Description |
@@ -13,6 +11,10 @@ Functional module decomposition based on coupling analysis of `config/` and `sto
 | 3 | [Project Policy](project-policy.md) | 1 | Load project-level security/policy configuration from `.pi/efficiency-subagent/config.json`. |
 | 4 | [Durable Run Storage](durable-run-storage.md) | 1 | Run directory lifecycle management, JSONL event/tool/session logging, search, and retention cleanup. Foundation of the storage layer. |
 | 5 | [Run Artifact Generation](run-artifact-generation.md) | 2 | Produce structured handoff documents and human-readable transcripts from raw run event data. |
+
+| 6 | [Core Assembly](core-layer.md) | 5 | Pure-algorithm assembly pipeline — types, registry, pipeline, composer, capability |
+| 7 | [Runtime I/O](runtime-layer.md) | 4 | Persistence, lifecycle, mount control, output formatting |
+| 8 | [Entry Layer](entry-layer.md) | 3 | Dependency wiring + public API |
 
 ## Barrel Files
 
@@ -41,3 +43,20 @@ Config barrels (`config-mod.md`) re-exports from Configuration → Profile Manag
 Storage barrel (`storage-mod.md`) re-exports from Durable Run Storage → Run Artifact Generation.
 
 **No cross-layer dependencies** — config files do not import from storage, and storage files do not import from config.
+
+## New Module Dependency Flow
+
+```
+core-layer (pure)
+  └── node:crypto (deterministic hashing)
+
+runtime-layer (I/O + lifecycle)
+  -> core-layer (pipeline, composer, registry types)
+  -> storage/   (event-log, run-artifacts)
+  -> input/     (profile-loader, project-loader, schema)
+  -> policy/    (evaluator, merge)
+
+entry-layer (assembler)
+  -> core-layer    (re-exports + pipeline/composer)
+  -> runtime-layer (registry-store, run lifecycle, actions)
+```

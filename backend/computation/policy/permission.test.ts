@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import { evaluate } from "./evaluator.ts";
-import { mergePolicies } from "./merge.ts";
-import { reset } from "../prompt/engine.ts";
-import { executeRun } from "../../../frontend/operation/mod.ts";
+import type { Policy } from "./types.ts";
+import { reset } from "../../runtime/prompt-state.ts";
+import { executeRun } from "../../entry/index.ts";
 import { readEvents } from "../../storage/mod.ts";
 
 const TMP = "/tmp/efficiency-perm-test-" + randomUUID().slice(0, 8);
@@ -21,7 +22,7 @@ function writeProfile(name: string, cwd: string) {
 }
 
 function writeProjectPolicy(cwd: string, policy: Record<string, unknown>) {
-  const configDir = `${cwd}/.pi/efficiency-subagent`;
+  const configDir = `${cwd}/.pi/better-subagent`;
   mkdirSync(configDir, { recursive: true });
   writeFileSync(`${configDir}/config.json`, JSON.stringify(policy));
 }
@@ -39,69 +40,73 @@ afterEach(() => {
 });
 
 describe("Policy evaluator — file A allowed, file B blocked", () => {
-  const policy = mergePolicies({
-    tools: ["read"],
-    paths: ["A.txt"],
-  });
+  const policy: Policy = {
+    allowTools: ["read"],
+    allowPaths: ["A.txt"],
+  };
 
   it("allows tool=read path=A.txt", () => {
-    const r = evaluate({ toolName: "read", filePath: "A.txt" }, policy);
+    const r = evaluate({ type: "read", path: "A.txt" }, policy);
     expect(r.allowed).toBe(true);
   });
 
-  it("blocks tool=read path=B.txt (not in allowlist)", () => {
-    const r = evaluate({ toolName: "read", filePath: "B.txt" }, policy);
+  it("blocks tool=read path=B.txt (not in allowPaths)", () => {
+    const r = evaluate({ type: "read", path: "B.txt" }, policy);
     expect(r.allowed).toBe(false);
-    expect(r.reason).toContain("not allowed");
+    expect(r.reason).toContain("allowPaths");
   });
 
   it("blocks tool=write path=A.txt (tool not allowed)", () => {
-    const r = evaluate({ toolName: "write", filePath: "A.txt" }, policy);
+    const r = evaluate({ type: "write", path: "A.txt" }, policy);
     expect(r.allowed).toBe(false);
-    expect(r.reason).toContain("not in allowed list");
+    expect(r.reason).toContain("allowTools");
   });
 
   it("allows tool=read path=B.txt when policy allows *", () => {
-    const wild = mergePolicies({ tools: ["read"], paths: ["*"] });
-    const r = evaluate({ toolName: "read", filePath: "B.txt" }, wild);
+    const wild: Policy = { allowTools: ["read"], allowPaths: ["*"] };
+    const r = evaluate({ type: "read", path: "B.txt" }, wild);
     expect(r.allowed).toBe(true);
   });
 });
 
 describe("Runtime — agent reads A.txt (policy allows)", () => {
   it("completes with tool_call event, no blocks", async () => {
-    writeProjectPolicy(TMP, { tools: ["read"], paths: ["A.txt", "file.txt"] });
+    writeProjectPolicy(TMP, { allowTools: ["read"], allowPaths: ["A.txt", "file.txt"] });
 
     const result = await executeRun({
+      profile: "restricted-agent",
+      task: "read A.txt",
       cwd: TMP,
-      params: { profile: "restricted-agent", task: "read A.txt" },
+      actions: [{ type: "tool_call", tool: "read", args: { path: "A.txt" } }],
     });
 
     expect(result.status).toBe("completed");
-    const events = await readEvents(result.runDir);
-    const blocks = events.filter((e) => e.event === "policy_block");
+    const events = await readEvents(dirname(result.handoffPath));
+    const blocks = events.filter((e) => e.type === "policy_block");
     expect(blocks.length).toBe(0);
-    const toolCalls = events.filter((e) => e.event === "tool_call");
+    const toolCalls = events.filter((e) => e.type === "tool_call");
     expect(toolCalls.length).toBe(1);
-    expect(toolCalls[0]?.toolName).toContain("read");
+    expect(toolCalls[0]?.data.tool).toContain("read");
   });
 });
 
 describe("Runtime — agent tries B.txt (policy blocks)", () => {
   it("emits a policy_block event, no tool call", async () => {
-    writeProjectPolicy(TMP, { tools: ["read"], paths: ["A.txt"] });
+    writeProjectPolicy(TMP, { allowTools: ["read"], allowPaths: ["A.txt"] });
 
     const result = await executeRun({
+      profile: "restricted-agent",
+      task: "try B.txt",
       cwd: TMP,
-      params: { profile: "restricted-agent", task: "try B.txt" },
+      actions: [{ type: "tool_call", tool: "read", args: { path: "B.txt" } }],
     });
 
-    const events = await readEvents(result.runDir);
-    const blocks = events.filter((e) => e.event === "policy_block");
+    const events = await readEvents(dirname(result.handoffPath));
+    const blocks = events.filter((e) => e.type === "policy_block");
     expect(blocks.length).toBe(1);
-    expect(blocks[0]?.reason).toContain("not allowed");
+    expect(blocks[0]?.data.reason).toContain("allowPaths");
 
-    const toolCalls = events.filter((e) => e.event === "tool_call");
+    const toolCalls = events.filter((e) => e.type === "tool_call");
     expect(toolCalls.length).toBe(0);
   });
 });

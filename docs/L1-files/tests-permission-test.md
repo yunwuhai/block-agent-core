@@ -1,8 +1,8 @@
-# tests/permission.test.ts
+# tests/permission.test.ts (`backend/computation/policy/permission.test.ts`)
 
 ## Purpose
 
-Integration and unit tests for the permission enforcement system — validates that `evaluate()` and `executeRun()` correctly allow/block tool calls by tool name and file path, and that the full runtime respects policy decisions.
+Integration and unit tests for the permission enforcement system — validates that `evaluate()` and `executeRun()` (imported from `../../runtime/mod.ts`) correctly allow/block tool calls by tool name and file path, and that the full runtime respects policy decisions.
 
 ## Setup / Teardown (lines 10–39)
 

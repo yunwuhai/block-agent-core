@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { reset } from "../../backend/computation/prompt/engine.ts";
-import { readEvents } from "../../backend/storage/mod.ts";
+import { reset } from "../computation/prompt/engine.ts";
+import { readEvents } from "../storage/mod.ts";
 import { executeRun } from "./mod.ts";
 
 const TMP = "/tmp/efficiency-subagent-test-" + randomUUID().slice(0, 8);
@@ -35,19 +35,19 @@ describe("Runtime runner", () => {
     expect(result.runId).toBeTruthy();
     expect(result.handoffPath).toContain("handoff.md");
 
-    const events = await readEvents(result.runDir);
+    const events = await readEvents(result.runDir.dir);
     expect(events.length).toBeGreaterThan(0);
-    const runStartEvents = events.filter((e) => e.event === "run_start");
+    const runStartEvents = events.filter((e) => e.type === "run_start");
     expect(runStartEvents.length).toBe(1);
   });
 
   it("blocks a tool call when policy denies it", async () => {
     // Create project policy config
-    const configDir = `${TMP}/.pi/efficiency-subagent`;
+    const configDir = `${TMP}/.pi/better-subagent`;
     mkdirSync(configDir, { recursive: true });
     writeFileSync(`${configDir}/config.json`, JSON.stringify({
-      paths: ["/nonexistent-allow/**"],
-      tools: ["nosuch"],
+      allowTools: ["nosuch"],
+      allowPaths: ["/nonexistent-allow/**"],
     }));
 
     const result = await executeRun({
@@ -55,8 +55,8 @@ describe("Runtime runner", () => {
       params: { profile: "test-profile", task: "try dangerous" },
     });
 
-    const events = await readEvents(result.runDir);
-    const blocked = events.filter((e) => e.event === "policy_block");
+    const events = await readEvents(result.runDir.dir);
+    const blocked = events.filter((e) => e.type === "policy_block");
     expect(blocked.length).toBeGreaterThan(0);
   });
 
@@ -75,8 +75,8 @@ describe("Runtime runner", () => {
 
     expect(result.status).toBe("completed");
     expect(result.runId).toBeTruthy();
-    const events = await readEvents(result.runDir);
-    const toolCalls = events.filter((e) => e.event === "tool_call");
+    const events = await readEvents(result.runDir.dir);
+    const toolCalls = events.filter((e) => e.type === "tool_call");
     expect(toolCalls.length).toBe(2);
   });
 
@@ -88,7 +88,7 @@ describe("Runtime runner", () => {
     });
 
     // Manually inject a slot into the slot engine (simulating runtime context output)
-    const { setSlot, listSlots, serializeSlots } = await import("../../backend/computation/prompt/engine.ts");
+    const { setSlot, listSlots, serializeSlots } = await import("../computation/prompt/engine.ts");
     setSlot("test-slot-x", "persisted content", 0, -1);
     expect(listSlots().has("test-slot-x")).toBe(true);
 
@@ -105,7 +105,7 @@ describe("Runtime runner", () => {
 
     // Run 2 (continuation): slots should be restored by executeRun
     // Reset in-memory slots to simulate fresh execute call
-    const { reset: resetSlots, deserializeSlots } = await import("../../backend/computation/prompt/engine.ts");
+    const { reset: resetSlots, deserializeSlots } = await import("../computation/prompt/engine.ts");
     resetSlots();
     expect(listSlots().has("test-slot-x")).toBe(false);
 

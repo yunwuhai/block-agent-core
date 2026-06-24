@@ -3,11 +3,16 @@ import { z } from "zod";
 // --- Multi-action support ---
 
 export const ActionSchema = z.object({
-  toolName: z.string().min(1).describe("Tool name (e.g. read, bash, write, edit)"),
+  toolName: z.string().min(1).describe("Tool name (read, bash, write, edit, scheduleEntries, unscheduleEntries)"),
   filePath: z.string().optional().describe("File path for read/write/edit tools"),
   command: z.string().optional().describe("Bash command string for bash tool"),
   url: z.string().optional().describe("URL for network fetch tool"),
   envVar: z.string().optional().describe("Environment variable name"),
+  scheduleTags: z.array(z.string()).optional().describe("Tags to schedule for context injection (scheduleEntries)"),
+  scheduleIds: z.array(z.string()).optional().describe("Entry IDs to schedule for context injection (scheduleEntries)"),
+  scheduleGroup: z.string().optional().describe("Group name to schedule all entries from (scheduleEntries)"),
+  unscheduleTags: z.array(z.string()).optional().describe("Tags to unschedule from context (unscheduleEntries)"),
+  unscheduleIds: z.array(z.string()).optional().describe("Entry IDs to unschedule from context (unscheduleEntries)"),
 });
 
 export type ActionParams = z.infer<typeof ActionSchema>;

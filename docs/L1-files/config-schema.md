@@ -6,7 +6,7 @@
 
 | Symbol | Kind | Lines | Description |
 |---|---|---|---|
-| `ActionSchema` | `z.ZodObject` | 5–11 | Single tool action: `toolName` (required) + optional `filePath`, `command`, `url`, `envVar`. |
+| `ActionSchema` | `z.ZodObject` | 5–16 | Single tool action: `toolName` (required) + optional `filePath`, `command`, `url`, `envVar`, `scheduleTags`, `scheduleIds`, `scheduleGroup`, `unscheduleTags`, `unscheduleIds`. |
 | `ActionParams` | type | 13 | Inferred type from `ActionSchema`. |
 | `ToolParamsSchema` | `z.ZodObject` | 15–20 | Top-level invocation payload: `profile`, `task`, optional `runId` and `actions` array. |
 | `ToolParams` | type | 22 | Inferred type from `ToolParamsSchema`. |

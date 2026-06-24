@@ -1,3 +1,9 @@
+> **REORGANIZED:** The registry subsystem has been restructured into a core/runtime split:
+> - **Algorithm layer** moved to `core/` — core/registry.ts, core/pipeline.ts, core/composer.ts
+> - **I/O layer** moved to `runtime/` — runtime/registry-store.ts, runtime/actions.ts
+> See `docs/L1-files/core-*.md` and `docs/L1-files/runtime-*.md` for the current implementations.
+> This file documents the LEGACY module and is retained for reference during migration.
+
 # L1 — `backend/computation/registry/storage.ts`
 
 **Purpose:** JSONL-backed Prompt Registry storage. Persists entries to `registry.jsonl`, persists call history to per-run `registry-calls.jsonl`, maintains in-memory indexes by id/name/tag/group, and tracks per-entry frequency counters.
@@ -9,7 +15,7 @@
 | Method | Lines | Description |
 |---|---|---|
 | `constructor(jsonlPath)` | 112–114 | Stores path to `registry.jsonl`. |
-| `load()` | 124–139 | Loads JSONL entries and rebuilds indexes. |
+| `load()` | 124–158 | Loads JSONL entries, rebuilds indexes, and restores frequency counters from `registry-calls.jsonl` (if `setCallsPath` was called before `load`). |
 | `save()` | 145–153 | Rewrites all registry entries as JSONL. |
 | `register(raw)` | 166–196 | Creates a new entry with UUID/timestamps/defaults and indexes it. Input omits generated/defaulted fields. |
 | `registerIfNew(raw)` | 207–240 | Deduplicates equivalent entries by type/description/content/filePath/createdBy/group, otherwise registers. Input omits generated/defaulted fields. |

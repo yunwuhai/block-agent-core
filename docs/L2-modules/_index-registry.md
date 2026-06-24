@@ -1,8 +1,12 @@
 # L2 Registry Modules — Index
 
-The Prompt Registry is decomposed into **4 L2 modules**, organized by the 3-layer architecture (Storage → Resolution → Orchestration) plus a Composer consumer layer and a shared Types foundation. The barrel file `registry-mod.md` re-exports the full public API across all modules.
+> **REORGANIZED (2026-06-23):** The registry subsystem has been split:
+> - **Algorithm** → `core/` (core/registry.ts, core/pipeline.ts, core/composer.ts)
+> - **I/O** → `runtime/` (runtime/registry-store.ts, runtime/actions.ts)
+> See `core-layer.md` and `runtime-layer.md` for current architecture.
+> The files documented below are LEGACY and retained for reference during migration.
 
-> **Step 4a status: DEFERRED.** All registry files remain in the legacy `registry/` directory. Planned move to `backend/storage/` (registry-storage) and `backend/computation/` (registry-types, registry-engine, registry-composer) not executed.
+The Prompt Registry is decomposed into **4 L2 modules**, organized by the 3-layer architecture (Storage → Resolution → Orchestration) plus a Composer consumer layer and a shared Types foundation. The barrel file `registry-mod.md` re-exports the full public API across all modules.
 
 ## Module Map
 
