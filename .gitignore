@@ -5,6 +5,9 @@ dist/
 # PI runtime data
 .pi/
 
+# Claude Code config
+.claude/
+
 # Prompt Registry runtime data
 registry.jsonl
 registry-calls.jsonl
@@ -12,6 +15,9 @@ registry-calls.jsonl
 # Development / workflow test data
 data/
 .omo/
+.opencode/
+.codex/
+.codegraph/
 
 # OS files
 .DS_Store
