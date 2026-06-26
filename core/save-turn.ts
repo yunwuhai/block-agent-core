@@ -1,4 +1,5 @@
 import { writeFile, mkdir } from "node:fs/promises";
+import { renameSync } from "node:fs";
 import { dirname } from "node:path";
 import { appendTurn } from "./turns.ts";
 import { appendToolCall } from "./tool-calls.ts";
@@ -32,6 +33,9 @@ function renderTurnMd(turn: TurnInput): string {
       lines.push("**Result:**");
       for (const c of block.content) {
         if (c.type === "text" && c.text) lines.push(c.text);
+        else if (c.type === "image") {
+          lines.push(`[Image: ${c.mimeType ?? "unknown"}]`);
+        }
       }
     }
   }
@@ -57,7 +61,9 @@ export interface SaveTurnParams {
 export async function saveTurn(params: SaveTurnParams): Promise<SavedTurn> {
   const mdContent = renderTurnMd(params.turn);
   await mkdir(dirname(params.turnMdPath), { recursive: true });
-  await writeFile(params.turnMdPath, mdContent, "utf-8");
+  const tmpMdPath = params.turnMdPath + ".tmp";
+  await writeFile(tmpMdPath, mdContent, "utf-8");
+  renameSync(tmpMdPath, params.turnMdPath);
 
   const turnRecord = await appendTurn(params.turnsPath, params.turnId, params.turnMdPath, params.turn);
 

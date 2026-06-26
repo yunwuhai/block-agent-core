@@ -19,7 +19,7 @@ interface QueryParams {
 export async function handleQuery(
   params: QueryParams,
   _ctx: ExtensionContext,
-): Promise<{ content: Array<{ type: "text"; text: string }> }> {
+): Promise<{ content: Array<{ type: "text"; text: string }>; details: unknown }> {
   let results: unknown[];
   switch (params.table) {
     case "turns":
@@ -44,12 +44,13 @@ export async function handleQuery(
       break;
     }
     default:
-      return { content: [{ type: "text", text: `Unknown table: ${params.table}` }] };
+      return { content: [{ type: "text", text: `Unknown table: ${params.table}` }], details: {} as any };
   }
   return {
     content: [{
       type: "text",
       text: `Found ${results.length} record(s) in ${params.table}:\n${JSON.stringify(results, null, 2)}`,
     }],
+    details: {} as any,
   };
 }

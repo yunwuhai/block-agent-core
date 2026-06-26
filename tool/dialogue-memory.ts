@@ -53,28 +53,29 @@ export function registerDialogueMemoryTool(pi: ExtensionAPI): void {
       ] as const)),
       id: Type.Optional(Type.String()),
       data: Type.Optional(Type.Object({})),
-    }),
+    }) as any,
 
     async execute(
       _toolCallId: string,
       params: Record<string, unknown>,
       _signal: AbortSignal | undefined,
-      _onUpdate: ((update: { content: Array<{ type: string; text: string }> }) => void) | undefined,
+      _onUpdate: ((update: any) => void) | undefined,
       ctx: ExtensionContext,
     ) {
       const action = params.action as string;
       switch (action) {
         case "load":
-          return handleLoad(params as Parameters<typeof handleLoad>[0], ctx);
+          return handleLoad(params as unknown as Parameters<typeof handleLoad>[0], ctx);
         case "save":
-          return handleSave(params as Parameters<typeof handleSave>[0], ctx);
+          return handleSave(params as unknown as Parameters<typeof handleSave>[0], ctx);
         case "query":
-          return handleQuery(params as Parameters<typeof handleQuery>[0], ctx);
+          return handleQuery(params as unknown as Parameters<typeof handleQuery>[0], ctx);
         case "manage":
-          return handleManage(params as Parameters<typeof handleManage>[0], ctx);
+          return handleManage(params as unknown as Parameters<typeof handleManage>[0], ctx);
         default:
           return {
             content: [{ type: "text" as const, text: `Unknown action: ${action}. Use load, save, query, or manage.` }],
+            details: {} as any,
           };
       }
     },

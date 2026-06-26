@@ -2,47 +2,71 @@
 
 > **状态：** 已批准
 > **日期：** 2026-06-26
-> **定位：** PI Coding Agent 扩展，纯库（不管理目录结构、不做 AI 决策）
+> **定位：** PI 扩展——定义标准化文件格式，提供纯函数 CRUD + 提示词拼装，以 PI 工具形式暴露给 AI 调用
 
 ## 1. 动机
 
 现有 efficiency-subagent 是一个"subagent 运行时"——它管理 run 生命周期、加载 profile、执行流水线、生成 handoff/transcript。但这个设计将"存储层"和"决策层"耦合在一起：AI 如何选择上下文、何时生成 handoff、怎样打 tag——这些决策被硬编码在运行时中。
 
-本设计将项目重新定位为**对话记忆数据库**（Dialogue Memory Database）。它只做两件事：
+本设计将项目重新定位为**对话记忆数据库**（Dialogue Memory Database）。它做三件事：
 
 1. 定义 8 种标准化文件格式
-2. 提供纯函数式 CRUD API + 提示词拼装工具
+2. 提供纯函数式 CRUD API + 提示词拼装工具（命名导出，无 PI 依赖）
+3. 以 **PI 扩展**形式注册 `dialogue_memory` 工具，供 AI 在会话中直接调用（默认导出）
 
-所有决策（workflow 策略、handoff 生成、tag 标注、上下文选择）交给上层调用方。
+所有决策（workflow 策略、handoff 生成、tag 标注、上下文选择）交给上层调用方——无论是一个手动的 PI 会话，还是一个通过 PI SDK 构建的 workflow agent。
 
 ## 2. 架构
 
 ```
-┌──────────────────────────────────────────────┐
-│         调用方（workflow 软件 / AI）           │
-│                                              │
-│  职责：                                       │
-│  - 目录结构管理                                │
-│  - AI 调用与策略                               │
-│  - handoff 生成（外部 subagent）               │
-│  - tag 生成（外部 subagent）                   │
-│  - 选择加载哪些上下文                           │
-│  - 管理 ID 序号                               │
-├──────────────────────────────────────────────┤
-│       本项目（对话记忆数据库）                   │
-│                                              │
-│  8 种文件 × 每种 4 个操作 + 拼装/发送/保存      │
-│                                              │
-│  append(path, record)    — 追加一条            │
-│  get(path, id)           — 按 ID 读取          │
-│  query(path, filter)     — 按条件查询          │
-│  update(path, id, patch) — 更新一条            │
-│                                              │
-│  buildPrompt(recipe, callRecord, resolver)     │
-│  sendPrompt(prompt, send)                     │
-│  saveTurn(params)                              │
-└──────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────┐
+│              上层调用方                               │
+│                                                     │
+│  方式 A：终端用户在 PI 中直接使用                       │
+│    pi → AI 调用 dialogue_memory 工具                 │
+│                                                     │
+│  方式 B：workflow agent（PI SDK 构建）                │
+│    createAgentSession({                              │
+│      extensionFactories: [dialogueMemoryExtension]   │
+│    })                                               │
+│    → AI 调用 dialogue_memory 工具                    │
+│    → 或直接 import { buildPrompt, saveTurn } 使用     │
+│                                                     │
+│  职责：                                              │
+│  - 目录结构管理                                       │
+│  - AI 调用与策略（通过 PI）                            │
+│  - handoff 生成（外部 subagent）                      │
+│  - tag 生成（外部 subagent）                          │
+│  - 选择加载哪些上下文                                  │
+│  - 管理 ID 序号                                      │
+├─────────────────────────────────────────────────────┤
+│           本项目（对话记忆数据库）                      │
+│                                                     │
+│  ┌─ 核心层（命名导出，零 PI 依赖）─┐                   │
+│  │                                  │                │
+│  │  8 种文件 × CRUD                 │                │
+│  │  buildPrompt()                   │                │
+│  │  saveTurn()                      │                │
+│  │                                  │                │
+│  ├──────────────────────────────────┤                │
+│  │  PI 扩展层（默认导出）             │                │
+│  │                                  │                │
+│  │  export default function(pi) {   │                │
+│  │    pi.registerTool({             │                │
+│  │      name: "dialogue_memory",    │                │
+│  │      ...                         │                │
+│  │    });                           │                │
+│  │  }                               │                │
+│  └──────────────────────────────────┘                │
+└─────────────────────────────────────────────────────┘
 ```
+
+**双导出设计：**
+
+| 导出方式 | 内容 | 用途 |
+|----------|------|------|
+| `export default function(pi)` | PI 扩展工厂，注册 `dialogue_memory` 工具 | PI 会话中 AI 直接调用 |
+| `export { buildPrompt, saveTurn, appendTurn, ... }` | 纯函数，无 PI 依赖 | Workflow agent 程序化调用 |
 
 与旧系统的关系：**完全重写。** 旧模块全部废弃，见附录 A。
 
@@ -288,6 +312,8 @@ separator = ""
 
 ## 5. API 表面
 
+### 5.1 核心层（命名导出，零 PI 依赖）
+
 ```typescript
 // ===========================================================================
 // 通用 CRUD — 每种文件提供相同模式的操作
@@ -330,7 +356,7 @@ addRecipe(recipePath: string, recipe: Recipe): void
 updateRecipe(recipePath: string, id: string, patch: Partial<Recipe>): void
 
 // ===========================================================================
-// 提示词拼装与发送
+// 提示词拼装
 // ===========================================================================
 
 /**
@@ -355,18 +381,6 @@ buildPrompt(
   resolver: (ref: Ref) => string,
 ): string
 
-/**
- * 将提示词发送给 AI 并获取回复。
- *
- * @param prompt  — buildPrompt 的产物
- * @param send    — 调用方注入的发送函数
- * @returns AI 的回复文本
- */
-sendPrompt(
-  prompt: string,
-  send: (prompt: string) => Promise<string>,
-): Promise<string>
-
 // ===========================================================================
 // 保存 — 整轮对话的一次性保存
 // ===========================================================================
@@ -389,6 +403,79 @@ saveTurn(params: {
   callRecord: CallRecordInput // 调用记录
 }): SavedTurn
 ```
+
+### 5.2 PI 扩展层（默认导出）
+
+```typescript
+/**
+ * PI 扩展入口。注册 dialogue_memory 工具到当前 PI 会话。
+ *
+ * 安装方式：
+ *   1. 放入 .pi/extensions/ 目录（PI 自动发现）
+ *   2. pi -e ./index.ts（快速测试）
+ *   3. PI SDK: extensionFactories: [dialogueMemoryExtension]
+ */
+export default function (pi: ExtensionAPI): void {
+  pi.registerTool({
+    name: "dialogue_memory",
+    label: "Dialogue Memory",
+    description: `对话记忆数据库——管理跨会话的对话历史、模板提示词、组装方案。
+支持 8 种文件格式的 CRUD，以及在对话中加载上下文、保存轮次。`,
+    parameters: Type.Object({
+      action: StringEnum([
+        "load",    // 加载上下文（buildPrompt）
+        "save",    // 保存当前轮次（saveTurn）
+        "query",   // 查询记录
+        "manage",  // 管理记录（CRUD）
+      ] as const),
+      // --- load 参数 ---
+      recipePath: Type.Optional(Type.String()),
+      recipeId: Type.Optional(Type.String()),
+      callRecordPath: Type.Optional(Type.String()),
+      // --- save 参数 ---
+      turnsPath: Type.Optional(Type.String()),
+      turnMdPath: Type.Optional(Type.String()),
+      toolsPath: Type.Optional(Type.String()),
+      refsPath: Type.Optional(Type.String()),
+      callRecordsPath: Type.Optional(Type.String()),
+      turn: Type.Optional(Type.Object({...})),       // TurnInput
+      toolCalls: Type.Optional(Type.Array(Type.Object({...}))),
+      fileRefs: Type.Optional(Type.Array(Type.Object({...}))),
+      callRecord: Type.Optional(Type.Object({...})),  // CallRecordInput
+      // --- query/manage 参数 ---
+      table: Type.Optional(StringEnum([
+        "turns", "toolCalls", "templates",
+        "fileRefs", "callRecords", "recipes",
+      ] as const)),
+      tablePath: Type.Optional(Type.String()),
+      filter: Type.Optional(Type.Object({})),
+      op: Type.Optional(StringEnum([
+        "get", "append", "update", "delete",
+      ] as const)),
+      id: Type.Optional(Type.String()),
+      data: Type.Optional(Type.Object({})),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      switch (params.action) {
+        case "load":
+          return handleLoad(params, ctx);
+        case "save":
+          return handleSave(params, ctx);
+        case "query":
+          return handleQuery(params, ctx);
+        case "manage":
+          return handleManage(params, ctx);
+      }
+    },
+  });
+}
+```
+
+**设计说明：**
+
+- **`sendPrompt` 被移除。** AI 调用由 PI 本身管理——当 AI 调用 `dialogue_memory` 工具时，返回的内容直接进入 PI 会话上下文。不需要库来"发送提示词"。
+- 如需程序化 AI 调用（workflow agent 场景），调用方直接使用 PI SDK 的 `createAgentSession()` + `session.prompt()`，库只负责拼装提示词和保存结果。
+- 工具参数中所有文件路径均为可选——AI 可在调用时动态指定，也可通过模板记录表中的预设路径。
 
 ### 过滤器类型
 
@@ -436,8 +523,11 @@ interface CallRecordFilter {
 │  ├─ zone.presets             │
 │  └─ zone.history             │
 ├──────────────────────────────┤
-│  当前轮对话内容（调用方提供）    │
-│  └─ 来自 TurnInput.userText  │
+│  当前轮对话内容                 │
+│  └─ PI 扩展模式：占位标记       │
+│     （AI 在实际对话中填充）      │
+│  └─ 程序化模式：调用方拼接       │
+│     TurnInput.userText        │
 ├──────────────────────────────┤
 │  after zones（按 recipe 顺序） │
 │  ├─ zone.attachments         │
@@ -445,7 +535,7 @@ interface CallRecordFilter {
 └──────────────────────────────┘
 ```
 
-当前轮对话内容由调用方在 `buildPrompt` 返回后自行拼接（通常放在 before 和 after 之间）。
+在 PI 扩展模式下，`buildPrompt` 返回的文本直接进入 AI 上下文——AI 看到的是"before zones + 当前对话 + after zones"的完整视图。当前轮对话由 PI 会话管理，无需库来发送。
 
 ## 7. 关键设计决策
 
@@ -459,6 +549,115 @@ interface CallRecordFilter {
 | 权限合并需二次确认 | 防止恶意/误操作模板合并扩大权限 |
 | TOML 而非 JSON 存组装方案 | 可读性、注释支持、嵌套数组自然 |
 | buildPrompt 用注入的 resolver | 库不依赖文件系统，调用方控制 IO |
+| PI 扩展而非独立 Agent | 作为工具被 AI 调用，不拥有自己的 AI 会话；AI 调用由 PI 管理 |
+| 双导出（命名 + 默认） | 核心层供 workflow agent 程序化调用；扩展层供 PI 会话中 AI 调用 |
+
+## 8. PI 工具行为设计
+
+### 8.1 工具定位
+
+`dialogue_memory` 是一个 PI 工具，注册到 PI 会话中供 AI 调用。它不创建自己的 AI 会话——AI 对话完全由 PI 管理。工具的职责是：
+
+1. **读写对话记忆文件**（8 种格式）
+2. **组装上下文提示词**（buildPrompt）
+3. **保存对话轮次**（saveTurn）
+
+### 8.2 四个 Action
+
+#### `load` — 加载上下文
+
+AI 在开始新一轮对话前调用，获取拼装好的上下文提示词。
+
+```
+输入：recipePath, recipeId, callRecordPath
+内部流程：
+  1. 从 recipePath 加载组装方案 → 找到 recipe
+  2. 从 callRecordPath 加载调用记录 → 获取各 zone 的 refs
+  3. 对每个 ref，resolver 读取对应文件内容
+  4. 按 zone 规则拼接
+  5. 附加当前轮用户输入的占位标记
+输出：拼装好的完整提示词文本 → 进入 PI 会话上下文
+```
+
+#### `save` — 保存轮次
+
+AI 在一轮对话结束后调用，持久化所有信息。
+
+```
+输入：turnsPath, turnMdPath, toolsPath, refsPath, callRecordsPath,
+      turn, toolCalls, fileRefs, callRecord
+内部流程：
+  1. 将 turn 写入 .md 文件
+  2. 追加 TurnRecord 到 turnsPath
+  3. 追加各 ToolCall 到 toolsPath
+  4. 追加各 FileRef 到 refsPath
+  5. 追加 CallRecord 到 callRecordsPath
+输出：SavedTurn（含所有写入的文件路径和记录 ID）
+```
+
+#### `query` — 查询记录
+
+AI 需要查找历史信息时调用。
+
+```
+输入：table, tablePath, filter
+内部流程：
+  1. 读取对应 .jsonl 表
+  2. 按 filter 过滤（tags, turnId, toolName, accessType 等）
+  3. 返回匹配记录列表
+输出：匹配的记录数组
+```
+
+#### `manage` — 管理记录
+
+AI 需要增删改记录时调用（模板管理、方案维护等）。
+
+```
+输入：table, tablePath, op, id, data
+内部流程：
+  op=get:    按 id 读取单条记录
+  op=append: 追加新记录（自动分配 id）
+  op=update: 更新已有记录的部分字段
+  op=delete: 删除记录（标记删除或物理删除，视实现而定）
+输出：操作结果
+```
+
+### 8.3 Resolver 策略
+
+`load` action 中的 resolver（将 Ref 解析为文本内容）有以下来源优先级：
+
+1. **对话记录**（`mode: "handoff"`）：读取 TurnRecord 的 `handoff` 摘要字段
+2. **对话记录**（`mode: "full"`，默认）：读取 TurnRecord 对应的完整 `.md` 文件
+3. **模板提示词**：读取 TemplateRecord 对应的 `.md` 文件内容
+4. **引用文件**（`lines` 指定）：按行范围读取 FileRefRecord 对应的实际文件
+5. **引用文件**（无 `lines`）：读取 FileRefRecord 对应文件的全部内容
+
+### 8.4 权限确认
+
+当 AI 调用 `manage` 或 `save` 涉及**写入**操作时，工具通过 `ctx.ui.confirm()` 向用户展示即将修改的文件路径并要求确认。
+
+当 AI 调用 `load` 并加载了多个模板时，如果合并后的权限集合（allowReadPaths/allowWritePaths/denyPaths）有新增项，工具向用户展示权限 diff 并要求二次确认。
+
+### 8.5 与 PI 会话的关系
+
+```
+PI 会话
+  │
+  ├─ 用户: "帮我写一个数据库查询函数"
+  │
+  ├─ AI 调用 dialogue_memory (action: "load")
+  │   └─ 工具返回拼装好的上下文（含历史对话摘要、相关模板、引用文件）
+  │
+  ├─ AI 基于上下文回答（调用 read/write/bash 等工具）
+  │
+  ├─ AI 调用 dialogue_memory (action: "save")
+  │   └─ 工具保存本轮对话、工具调用记录、文件引用、调用记录
+  │
+  └─ 用户: "继续完善这个函数"
+      ├─ AI 调用 dialogue_memory (action: "load")
+      │   └─ 加载上一轮 handoff + 模板权限
+      └─ ...（循环）
+```
 
 ---
 
@@ -466,7 +665,7 @@ interface CallRecordFilter {
 
 | 旧模块 | 原因 |
 |--------|------|
-| `backend/runtime/run.ts` (RunLifecycle) | 被 CRUD API + buildPrompt 替代 |
+| `backend/runtime/run.ts` (RunLifecycle) | 被 CRUD API + dialogue_memory 工具的 load/save action 替代 |
 | `backend/storage/event-log.ts` (events.jsonl) | 被 #3 工具调用信息替代 |
 | `backend/storage/run-artifacts.ts` (handoff/transcript) | 被 #1 #2 单轮对话替代 |
 | `backend/runtime/registry-store.ts` (registry.jsonl) | 被 #2 #5 #6 记录表替代 |
@@ -479,9 +678,37 @@ interface CallRecordFilter {
 | `backend/runtime/actions.ts` (MountController) | schedule/unschedule 概念废弃 |
 | `backend/runtime/output.ts` (handoff/transcript 格式化) | 被 saveTurn 替代 |
 | `backend/output/` | 同上 |
-| `index.ts` (PI 工具注册) | 重写为对话记忆数据库入口 |
+| `index.ts` (PI 工具注册) | 重写：默认导出 PI 扩展（注册 `dialogue_memory` 工具），命名导出核心 CRUD + buildPrompt + saveTurn |
 
 **保留：** 仅 `backend/core/types.ts`（重定义新类型）。
+
+### 新模块结构
+
+```
+efficiency-subagent/
+├── index.ts                    # 默认导出 PI 扩展 + 命名导出核心 API
+├── core/
+│   ├── types.ts                # 全部类型定义（从旧 types.ts 重写）
+│   ├── turns.ts                # Turn CRUD（appendTurn, getTurn, queryTurns, updateTurn）
+│   ├── tool-calls.ts           # ToolCall CRUD
+│   ├── templates.ts            # Template CRUD
+│   ├── file-refs.ts            # FileRef CRUD
+│   ├── call-records.ts         # CallRecord CRUD
+│   ├── recipes.ts              # Recipe CRUD（TOML 读写）
+│   ├── build-prompt.ts         # buildPrompt（提示词拼装引擎）
+│   └── save-turn.ts            # saveTurn（整轮保存编排）
+├── tool/
+│   ├── dialogue-memory.ts      # PI 工具定义（parameters + execute）
+│   └── actions/
+│       ├── load.ts             # load action 实现
+│       ├── save.ts             # save action 实现
+│       ├── query.ts            # query action 实现
+│       └── manage.ts           # manage action 实现
+└── utils/
+    ├── jsonl.ts                # JSONL 原子读写工具
+    ├── toml.ts                 # TOML 解析/序列化
+    └── glob.ts                 # Glob 匹配（权限路径）
+```
 
 ## 附录 B：输入类型 vs 记录类型
 

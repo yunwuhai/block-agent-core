@@ -59,7 +59,7 @@ export async function updateJsonl<T extends { id: string }>(
   const records = await readJsonl<T>(filePath);
   const index = records.findIndex(r => r.id === id);
   if (index === -1) return false;
-  records[index] = { ...records[index], ...patch };
+  records[index] = { ...records[index], ...patch } as T;
   await writeJsonl(filePath, records);
   return true;
 }

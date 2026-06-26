@@ -1,13 +1,9 @@
-import { describe, it, expect, beforeAll, afterAll } from "bun:test";
+import { describe, it, expect, afterAll } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { readJsonl, appendJsonl, writeJsonl, updateJsonl, deleteJsonl } from "./jsonl.ts";
 
 const tmpDir = mkdtempSync("/tmp/jsonl-test-");
-
-beforeAll(() => {
-  // ensure clean state per test
-});
 
 afterAll(() => {
   rmSync(tmpDir, { recursive: true, force: true });

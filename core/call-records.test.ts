@@ -31,7 +31,7 @@ describe("appendCallRecord", () => {
     expect(record.id).toBe("rec-001");
     expect(record.recipeId).toBe("default-context");
     expect(record.zones.config).toHaveLength(1);
-    expect(record.zones.history[0]!.mode).toBe("handoff");
+    expect(record.zones.history![0]!.mode).toBe("handoff");
   });
 });
 

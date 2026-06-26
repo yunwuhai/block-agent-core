@@ -25,6 +25,12 @@
       ],
       "@earendil-works/pi-coding-agent/*": [
         "/home/whypc/.local/share/pi-node/node-v22.22.3-linux-x64/lib/node_modules/@earendil-works/pi-coding-agent/dist/*"
+      ],
+      "@earendil-works/pi-ai": [
+        "/home/whypc/.local/share/pi-node/node-v22.22.3-linux-x64/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai/dist"
+      ],
+      "@earendil-works/pi-ai/*": [
+        "/home/whypc/.local/share/pi-node/node-v22.22.3-linux-x64/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai/dist/*"
       ]
     }
   },
