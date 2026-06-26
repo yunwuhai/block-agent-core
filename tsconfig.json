@@ -28,5 +28,5 @@
       ]
     }
   },
-  "include": ["index.ts", "backend/**/*.ts", "core/**/*.ts", "*.test.ts"]
+  "include": ["index.ts", "core/**/*.ts", "tool/**/*.ts", "utils/**/*.ts", "*.test.ts"]
 }
