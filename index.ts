@@ -1,9 +1,15 @@
 // index.ts
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { registerDialogueMemoryTool } from "./tool/dialogue-memory.ts";
+// ===========================================================================
+// 对话记忆数据库 (Dialogue Memory Database)
+//
+// 双导出：
+//   - 默认导出: PI 扩展工厂（动态加载 PI 依赖，保持核心层零 PI）
+//   - 命名导出: 核心 CRUD + buildPrompt + saveTurn（零 PI 依赖）
+// ===========================================================================
 
-// Default export: PI extension
-export default function (pi: ExtensionAPI): void {
+// Default export: PI extension — lazily imports PI modules
+export default async function (pi: import("@earendil-works/pi-coding-agent").ExtensionAPI): Promise<void> {
+  const { registerDialogueMemoryTool } = await import("./tool/dialogue-memory.ts");
   registerDialogueMemoryTool(pi);
 }
 
