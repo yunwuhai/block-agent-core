@@ -40,8 +40,8 @@ export async function handleManage(
           return { content: [{ type: "text", text: r ? JSON.stringify(r, null, 2) : `Turn ${params.id} not found.` }], details: {} as any };
         }
         if (params.op === "append") {
-          const d = params.data as unknown as TurnInput & { turnMdPath: string };
-          const r = await appendTurn(params.tablePath, params.id, d.turnMdPath, d);
+          const d = params.data as unknown as TurnInput & { turnMdPath?: string };
+          const r = await appendTurn(params.tablePath, params.id, d.turnMdPath ?? `turns/${params.id}.md`, d);
           return { content: [{ type: "text", text: `Turn appended: ${JSON.stringify(r)}` }], details: {} as any };
         }
         if (params.op === "update") { await updateTurn(params.tablePath, params.id, params.data); return { content: [{ type: "text", text: `Turn ${params.id} updated.` }], details: {} as any }; }
@@ -67,8 +67,8 @@ export async function handleManage(
           return { content: [{ type: "text", text: r ? JSON.stringify(r, null, 2) : `Template ${params.id} not found.` }], details: {} as any };
         }
         if (params.op === "append") {
-          const d = params.data as unknown as TemplateInput & { templateMdPath: string };
-          const r = await appendTemplate(params.tablePath, params.id, d.templateMdPath, d);
+          const d = params.data as unknown as TemplateInput & { templateMdPath?: string };
+          const r = await appendTemplate(params.tablePath, params.id, d.templateMdPath ?? d.path, d);
           return { content: [{ type: "text", text: `Template appended: ${JSON.stringify(r)}` }], details: {} as any };
         }
         if (params.op === "update") { await updateTemplate(params.tablePath, params.id, params.data); return { content: [{ type: "text", text: `Template ${params.id} updated.` }], details: {} as any }; }
