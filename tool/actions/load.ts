@@ -4,6 +4,7 @@ import { buildPrompt } from "../../core/build-prompt.ts";
 import { readJsonl } from "../../utils/jsonl.ts";
 import { readFile } from "node:fs/promises";
 import type { CallRecord, Ref } from "../../core/types.ts";
+import { setPermissions, clearPermissions } from "../permissions.ts";
 
 interface LoadParams {
   recipePath: string;
@@ -59,41 +60,50 @@ export async function handleLoad(
   }
 
   // Collect template refs and merge permissions
-  if (ctx.hasUI) {
-    const templateRefs: Ref[] = [];
-    for (const zoneRefs of Object.values(callRecord.zones)) {
-      for (const ref of zoneRefs) {
-        if (ref.file.includes("template")) templateRefs.push(ref);
+  const templateRefs: Ref[] = [];
+  for (const zoneRefs of Object.values(callRecord.zones)) {
+    for (const ref of zoneRefs) {
+      if (ref.file.includes("template")) templateRefs.push(ref);
+    }
+  }
+  if (templateRefs.length > 0) {
+    const allowedReads = new Set<string>();
+    const allowedWrites = new Set<string>();
+    const denied = new Set<string>();
+    let allowBash = false;
+    for (const tr of templateRefs) {
+      const records = await readJsonl<Record<string, any>>(tr.file);
+      const tmpl = records.find((r: any) => r.id === tr.id);
+      if (tmpl) {
+        (tmpl.allowReadPaths || []).forEach((p: string) => allowedReads.add(p));
+        (tmpl.allowWritePaths || []).forEach((p: string) => allowedWrites.add(p));
+        (tmpl.denyPaths || []).forEach((p: string) => denied.add(p));
+        if (tmpl.allowBash) allowBash = true;
       }
     }
-    if (templateRefs.length > 0) {
-      const allowedReads = new Set<string>();
-      const allowedWrites = new Set<string>();
-      const denied = new Set<string>();
-      let allowBash = false;
-      for (const tr of templateRefs) {
-        const records = await readJsonl<Record<string, any>>(tr.file);
-        const tmpl = records.find((r: any) => r.id === tr.id);
-        if (tmpl) {
-          (tmpl.allowReadPaths || []).forEach((p: string) => allowedReads.add(p));
-          (tmpl.allowWritePaths || []).forEach((p: string) => allowedWrites.add(p));
-          (tmpl.denyPaths || []).forEach((p: string) => denied.add(p));
-          if (tmpl.allowBash) allowBash = true;
-        }
-      }
-      if (allowedReads.size > 0 || allowedWrites.size > 0 || allowBash) {
-        const lines = [
-          ...Array.from(allowedReads).map(p => `  read: ${p}`),
-          ...Array.from(allowedWrites).map(p => `  write: ${p}`),
-          ...Array.from(denied).map(p => `  deny: ${p}`),
-          allowBash ? "  bash: yes" : "",
-        ].filter(Boolean);
-        if (lines.length > 0) {
-          const ok = await ctx.ui.confirm("Template Permissions", `Loaded templates grant:\n${lines.join("\n")}\n\nProceed?`);
-          if (!ok) return { content: [{ type: "text", text: "Operation cancelled by user." }], details: {} as any };
+    // Store permissions for tool_call interceptor (regardless of UI)
+    setPermissions(
+      Array.from(allowedReads),
+      Array.from(allowedWrites),
+      Array.from(denied),
+    );
+    if (ctx.hasUI && (allowedReads.size > 0 || allowedWrites.size > 0 || allowBash)) {
+      const lines = [
+        ...Array.from(allowedReads).map(p => `  read: ${p}`),
+        ...Array.from(allowedWrites).map(p => `  write: ${p}`),
+        ...Array.from(denied).map(p => `  deny: ${p}`),
+        allowBash ? "  bash: yes" : "",
+      ].filter(Boolean);
+      if (lines.length > 0) {
+        const ok = await ctx.ui.confirm("Template Permissions", `Loaded templates grant:\n${lines.join("\n")}\n\nProceed?`);
+        if (!ok) {
+          clearPermissions();
+          return { content: [{ type: "text", text: "Operation cancelled by user." }], details: {} as any };
         }
       }
     }
+  } else {
+    clearPermissions();
   }
 
   const resolver = (ref: Ref): string =>

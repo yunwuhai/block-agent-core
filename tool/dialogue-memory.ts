@@ -1,13 +1,39 @@
 // tool/dialogue-memory.ts
 import { Type } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, ToolCallEvent } from "@earendil-works/pi-coding-agent";
 import { handleLoad } from "./actions/load.ts";
 import { handleSave } from "./actions/save.ts";
 import { handleQuery } from "./actions/query.ts";
 import { handleManage } from "./actions/manage.ts";
+import { checkRead, checkWrite } from "./permissions.ts";
 
 export function registerDialogueMemoryTool(pi: ExtensionAPI): void {
+  // -----------------------------------------------------------------------
+  // File-level permission sandbox: intercept read / write / edit tool calls
+  // and enforce template allowReadPaths / allowWritePaths / denyPaths.
+  // -----------------------------------------------------------------------
+  pi.on("tool_call", (event: ToolCallEvent) => {
+    // Only intercept file-access tools; bash is deliberately not handled.
+    if (
+      event.toolName === "read" ||
+      event.toolName === "write" ||
+      event.toolName === "edit"
+    ) {
+      const input = event.input as { path?: string };
+      if (input.path) {
+        const result =
+          event.toolName === "read"
+            ? checkRead(input.path)
+            : checkWrite(input.path);
+        if (!result.allowed) {
+          return { block: true, ...(result.reason ? { reason: result.reason } : {}) };
+        }
+      }
+    }
+    return;
+  });
+
   pi.registerTool({
     name: "dialogue_memory",
     label: "Dialogue Memory",
