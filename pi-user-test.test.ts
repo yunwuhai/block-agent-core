@@ -1,5 +1,5 @@
 // pi-user-test.test.ts
-// PI 扩展用户综合测试 — 模拟安装验证 + API 流程测试 + 权限沙箱测试
+// PI 扩展用户综合测试 — 模拟安装验证 + API 流程测试
 // 作者: 测试角色 "PI 扩展用户"
 // 日期: 2026-06-28
 
@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 // ============================================================================
-// Part 1: Core CRUD API — 验证导入和基本增删查改
+// Core CRUD API — 验证导入和基本增删查改
 // ============================================================================
 
 import {
@@ -21,7 +21,7 @@ import {
   // File refs
   appendFileRef, getFileRef, queryFileRefs, updateFileRef,
   // Call records
-  appendCallRecord, getCallRecord, queryCallRecords, updateCallRecord,
+  appendCallRecord, queryCallRecords,
   // Recipes
   loadRecipes, getRecipe, addRecipe, updateRecipe,
   // Prompt building
@@ -29,19 +29,10 @@ import {
   // Save turn
   saveTurn,
   // Types
-  type TurnInput, type Recipe, type TurnRecord,
-  type ToolCallRecord, type TemplateRecord,
-  type FileRefRecord, type CallRecord,
+  type TurnInput, type Recipe,
+  type CallRecord,
   type SavedTurn,
 } from "./index.ts";
-
-// ============================================================================
-// Part 2: Permission sandbox
-// ============================================================================
-
-import {
-  setPermissions, clearPermissions, checkRead, checkWrite, getPermissions,
-} from "./tool/permissions.ts";
 
 // ============================================================================
 // Test infrastructure
@@ -188,13 +179,9 @@ describe("CRUD: Templates", () => {
     const record = await appendTemplate(templatesPath, "tmpl-001", tmplMdPath, {
       path: tmplMdPath,
       tags: ["review", "coding"],
-      allowReadPaths: ["/home/project/src/**"],
-      allowWritePaths: [],
     });
     expect(record.id).toBe("tmpl-001");
     expect(record.tags).toContain("review");
-    expect(record.allowReadPaths).toEqual(["/home/project/src/**"]);
-    expect(record.allowBash).toBe(false);
   });
 
   it("queryTemplates filters by tags", async () => {
@@ -208,15 +195,13 @@ describe("CRUD: Templates", () => {
     expect(record!.id).toBe("tmpl-001");
   });
 
-  it("updateTemplate patches allowBash and denyPaths", async () => {
+  it("updateTemplate patches tags", async () => {
     const ok = await updateTemplate(templatesPath, "tmpl-001", {
-      allowBash: true,
-      denyPaths: ["/etc/passwd"],
+      tags: ["review", "coding", "updated"],
     });
     expect(ok).toBe(true);
     const updated = await getTemplate(templatesPath, "tmpl-001");
-    expect(updated!.allowBash).toBe(true);
-    expect(updated!.denyPaths).toEqual(["/etc/passwd"]);
+    expect(updated!.tags).toContain("updated");
   });
 });
 
@@ -548,137 +533,6 @@ describe("saveTurn — one-shot turn persistence", () => {
     expect(mdContent).toContain("## Assistant (tool: read)");
     expect(mdContent).toContain("## Assistant (tool: write)");
     expect(mdContent).toContain("// db config");
-  });
-});
-
-// ============================================================================
-// Test Suite 8: Permission Sandbox
-// ============================================================================
-
-describe("Permission Sandbox", () => {
-  afterAll(() => {
-    clearPermissions();
-  });
-
-  it("Open mode: no permissions → everything allowed", () => {
-    clearPermissions();
-    expect(getPermissions()).toBeNull();
-    expect(checkRead("/etc/passwd").allowed).toBe(true);
-    expect(checkWrite("/etc/shadow").allowed).toBe(true);
-  });
-
-  it("Allow list: blocks paths outside allowed zone", () => {
-    setPermissions(
-      ["/home/project/src/**", "/home/project/README.md"],
-      ["/home/project/output/**"],
-      [],
-    );
-
-    // Read inside allowed → allowed
-    expect(checkRead("/home/project/src/main.ts").allowed).toBe(true);
-    expect(checkRead("/home/project/src/utils/helper.ts").allowed).toBe(true);
-    expect(checkRead("/home/project/README.md").allowed).toBe(true);
-
-    // Read outside allowed → blocked
-    expect(checkRead("/etc/passwd").allowed).toBe(false);
-    expect(checkRead("/home/project/.env").allowed).toBe(false);
-
-    // Write inside write-allow
-    expect(checkWrite("/home/project/output/bundle.js").allowed).toBe(true);
-
-    // Write outside write-allow (even if readable)
-    expect(checkWrite("/home/project/src/main.ts").allowed).toBe(false);
-  });
-
-  it("Deny takes precedence over allow", () => {
-    setPermissions(
-      ["/home/project/**"],
-      [],
-      ["/home/project/secrets/**", "/home/project/*.env"],
-    );
-
-    // Inside allow but also deny → blocked
-    const result = checkRead("/home/project/secrets/key.pem");
-    expect(result.allowed).toBe(false);
-    expect(result.reason).toContain("deny pattern");
-
-    // Root allow but deny matches → blocked
-    expect(checkRead("/home/project/.env").allowed).toBe(false);
-
-    // In allow, not in deny → allowed
-    expect(checkRead("/home/project/src/main.ts").allowed).toBe(true);
-  });
-
-  it("Deny with empty allow lists → allow all except denied", () => {
-    setPermissions([], [], ["/blocked/**"]);
-
-    expect(checkRead("/blocked/secret.txt").allowed).toBe(false);
-    expect(checkRead("/random/file.txt").allowed).toBe(true);
-    expect(checkWrite("/random/file.txt").allowed).toBe(true);
-  });
-
-  it("Read and write use separate allow lists", () => {
-    setPermissions(
-      ["/read-only/**"],
-      ["/write-only/**"],
-      [],
-    );
-
-    expect(checkRead("/read-only/file.txt").allowed).toBe(true);
-    expect(checkWrite("/read-only/file.txt").allowed).toBe(false);
-
-    expect(checkWrite("/write-only/file.txt").allowed).toBe(true);
-    expect(checkRead("/write-only/file.txt").allowed).toBe(false);
-  });
-
-  it("Glob pattern: ** matches any depth", () => {
-    setPermissions(["/workspace/**"], [], []);
-    expect(checkRead("/workspace/a.ts").allowed).toBe(true);
-    expect(checkRead("/workspace/deep/nested/file.ts").allowed).toBe(true);
-  });
-
-  it("Glob pattern: * matches single segment only", () => {
-    setPermissions(["/src/*.ts"], [], []);
-    expect(checkRead("/src/app.ts").allowed).toBe(true);
-    expect(checkRead("/src/sub/app.ts").allowed).toBe(false);
-  });
-
-  it("Glob pattern: ? matches single character", () => {
-    setPermissions(["/data/file-?.txt"], [], []);
-    expect(checkRead("/data/file-1.txt").allowed).toBe(true);
-    expect(checkRead("/data/file-12.txt").allowed).toBe(false);
-  });
-
-  it("Multiple allow patterns: union matching", () => {
-    setPermissions(["/src/**", "/tests/**"], [], []);
-    expect(checkRead("/src/main.ts").allowed).toBe(true);
-    expect(checkRead("/tests/main.test.ts").allowed).toBe(true);
-    expect(checkRead("/docs/readme.md").allowed).toBe(false);
-  });
-
-  it("clearPermissions resets to open mode", () => {
-    setPermissions(["/restricted/**"], [], []);
-    expect(checkRead("/outside/file.txt").allowed).toBe(false);
-
-    clearPermissions();
-    expect(getPermissions()).toBeNull();
-    expect(checkRead("/outside/file.txt").allowed).toBe(true);
-  });
-
-  it("Re-setting permissions replaces previous state", () => {
-    setPermissions(["/old/**"], [], []);
-    expect(checkRead("/old/file.txt").allowed).toBe(true);
-    expect(checkRead("/new/file.txt").allowed).toBe(false);
-
-    setPermissions(["/new/**"], [], []);
-    expect(checkRead("/old/file.txt").allowed).toBe(false);
-    expect(checkRead("/new/file.txt").allowed).toBe(true);
-  });
-
-  it("All-empty arrays with setPermissions → open mode for everything", () => {
-    setPermissions([], [], []);
-    expect(checkRead("/anything.txt").allowed).toBe(true);
-    expect(checkWrite("/anything.txt").allowed).toBe(true);
   });
 });
 

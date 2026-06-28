@@ -22,8 +22,9 @@ export function buildPromptFromRecipe(
   callRecord: CallRecord,
   resolver: (ref: Ref) => string,
 ): string {
-  const beforeZones = recipe.zones.filter(z => z.position === "before");
-  const afterZones = recipe.zones.filter(z => z.position === "after");
+  const zones = recipe.zones ?? [];
+  const beforeZones = zones.filter(z => z.position === "before");
+  const afterZones = zones.filter(z => z.position === "after");
 
   const beforeParts: string[] = [];
   for (const zone of beforeZones) {

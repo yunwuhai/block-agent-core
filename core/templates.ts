@@ -12,10 +12,6 @@ export async function appendTemplate(
     id,
     path: templateMdPath,
     tags: tmpl.tags ?? [],
-    allowReadPaths: tmpl.allowReadPaths ?? [],
-    allowWritePaths: tmpl.allowWritePaths ?? [],
-    denyPaths: tmpl.denyPaths ?? [],
-    allowBash: tmpl.allowBash ?? false,
   };
   await appendJsonl(tablePath, record);
   return record;

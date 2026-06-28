@@ -18,7 +18,7 @@ const sampleRecipe: Recipe = {
   zones: [
     {
       name: "config",
-      description: "Tool tables and permission config",
+      description: "Tool tables config",
       position: "before",
       separator: "",
     },

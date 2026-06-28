@@ -15,20 +15,12 @@ afterAll(() => {
 const sampleInput: TemplateInput = {
   path: "templates/code-review.md",
   tags: ["review", "code"],
-  allowReadPaths: ["/home/project/*"],
-  allowWritePaths: ["/home/project/src/*"],
-  denyPaths: ["/home/project/.env"],
-  allowBash: false,
 };
 
 describe("appendTemplate", () => {
-  it("appends a template record with permissions", async () => {
+  it("appends a template record", async () => {
     const record = await appendTemplate(tablePath, "tmpl-001", "templates/code-review.md", sampleInput);
     expect(record.id).toBe("tmpl-001");
-    expect(record.allowReadPaths).toEqual(["/home/project/*"]);
-    expect(record.allowWritePaths).toEqual(["/home/project/src/*"]);
-    expect(record.denyPaths).toEqual(["/home/project/.env"]);
-    expect(record.allowBash).toBe(false);
     expect(record.tags).toEqual(["review", "code"]);
   });
 });
@@ -51,7 +43,6 @@ describe("queryTemplates", () => {
     await appendTemplate(tablePath, "tmpl-002", "templates/deploy.md", {
       path: "templates/deploy.md",
       tags: ["deploy", "bash"],
-      allowBash: true,
     });
     const results = await queryTemplates(tablePath, { tags: ["review"] });
     expect(results).toHaveLength(1);
@@ -65,12 +56,12 @@ describe("queryTemplates", () => {
 });
 
 describe("updateTemplate", () => {
-  it("updates denyPaths", async () => {
+  it("updates tags", async () => {
     const ok = await updateTemplate(tablePath, "tmpl-001", {
-      denyPaths: ["/home/project/.env", "/home/project/secrets/*"],
+      tags: ["review", "code", "updated"],
     });
     expect(ok).toBe(true);
     const record = await getTemplate(tablePath, "tmpl-001");
-    expect(record!.denyPaths).toHaveLength(2);
+    expect(record!.tags).toContain("updated");
   });
 });

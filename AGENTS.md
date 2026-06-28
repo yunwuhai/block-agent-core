@@ -1,6 +1,6 @@
 # AGENTS.md — better-subagent
 
-The project is a **Dialogue Memory Database** — a CRUD library for conversation turns, tool calls, templates, file references, call records, and recipes, backed by JSONL persistence with a permission sandbox. Named exports provide a zero-PI-dependency core API; the default export is a PI extension factory.
+The project is a **Dialogue Memory Database** — a CRUD library for conversation turns, tool calls, templates, file references, call records, and recipes, backed by JSONL persistence. Named exports provide a zero-PI-dependency core API; the default export is a PI extension factory.
 
 ## 核心规则
 
@@ -25,11 +25,10 @@ tsc --noEmit      # 类型检查
 ## 架构速览
 
 - `core/` — Pure function layer (zero PI dependency, zero I/O). Turn CRUD, tool-call records, templates, file references, call records, recipes (TOML), prompt building, save-turn orchestration, and shared types.
-- `tool/` — PI integration layer. Dialogue memory tool registration + permission sandbox (`permissions.ts`) + action handlers (`actions/`).
+- `tool/` — PI integration layer. Dialogue memory tool registration + action handlers (`actions/`).
 - `utils/` — Shared helpers: JSONL file I/O (read, append, update, delete with atomic writes), glob pattern matching, TOML I/O.
 - `index.ts` — Dual export: default (PI extension factory) + named (core CRUD API).
 - `skills/` — PI auto-discovered skill definitions.
-- `.profiles/` — User-authored profiles (YAML frontmatter + markdown body).
 
 ## 关键约束
 

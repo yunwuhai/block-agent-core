@@ -89,20 +89,12 @@ export interface ToolCallFilter {
 export interface TemplateInput {
   path: string;              // 指向 .md 文件
   tags?: string[];
-  allowReadPaths?: string[];
-  allowWritePaths?: string[];
-  denyPaths?: string[];
-  allowBash?: boolean;
 }
 
 export interface TemplateRecord {
   id: string;                // tmpl-NNN
   path: string;
   tags: string[];
-  allowReadPaths: string[];
-  allowWritePaths: string[];
-  denyPaths: string[];
-  allowBash: boolean;
 }
 
 export interface TemplateFilter {

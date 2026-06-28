@@ -6,13 +6,6 @@ import {
   appendTemplate, addRecipe, buildPrompt, saveTurn, queryTurns,
 } from "./index.ts";
 import type { TurnInput, Recipe } from "./core/types.ts";
-import {
-  setPermissions,
-  getPermissions,
-  checkRead,
-  checkWrite,
-  clearPermissions,
-} from "./tool/permissions.ts";
 
 const tmpDir = mkdtempSync("/tmp/e2e-dm-test-");
 
@@ -34,7 +27,6 @@ describe("End-to-end dialogue memory flow", () => {
     await appendTemplate(templatesPath, "tmpl-001", join(tmpDir, "tmpl-cr.md"), {
       path: join(tmpDir, "tmpl-cr.md"),
       tags: ["review"],
-      allowReadPaths: ["/home/project/*"],
     });
 
     // Setup: recipe
@@ -100,42 +92,4 @@ describe("End-to-end dialogue memory flow", () => {
   });
 });
 
-describe("Permission sandbox integration", () => {
-  it("template with allowReadPaths → setPermissions → checkRead enforces path access", () => {
-    setPermissions(
-      ["/home/project/src/**"],
-      ["/home/project/output/**"],
-      ["/home/project/secrets/**"],
-    );
 
-    const p = getPermissions();
-    expect(p).not.toBeNull();
-    expect(p!.readPaths).toEqual(["/home/project/src/**"]);
-    expect(p!.writePaths).toEqual(["/home/project/output/**"]);
-    expect(p!.denyPaths).toEqual(["/home/project/secrets/**"]);
-
-    // Read enforcement
-    expect(checkRead("/home/project/src/main.ts").allowed).toBe(true);
-    expect(checkRead("/home/project/secrets/key.pem").allowed).toBe(false);
-    expect(checkRead("/etc/passwd").allowed).toBe(false);
-
-    // Write enforcement (separate allow list)
-    expect(checkWrite("/home/project/output/build.js").allowed).toBe(true);
-    expect(checkWrite("/home/project/src/main.ts").allowed).toBe(false);
-
-    // Deny takes precedence
-    expect(checkRead("/home/project/secrets/key.pem").allowed).toBe(false);
-    expect(checkRead("/home/project/secrets/key.pem").reason).toContain("deny pattern");
-
-    clearPermissions();
-    expect(getPermissions()).toBeNull();
-    expect(checkRead("/etc/passwd").allowed).toBe(true);
-  });
-
-  it("empty permissions → open mode (backward compatible)", () => {
-    clearPermissions();
-    expect(checkRead("/anywhere/file.txt").allowed).toBe(true);
-    expect(checkWrite("/anywhere/file.txt").allowed).toBe(true);
-    expect(checkRead("/etc/passwd").allowed).toBe(true);
-  });
-});

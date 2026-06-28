@@ -6,7 +6,7 @@ This manual explains how to use and understand the better-subagent project. It i
 
 ## What This Project Is
 
-better-subagent is a **Dialogue Memory Database**. It provides structured conversation persistence: storing conversation turns, tool call records, templates, file references, and call records as JSONL files with full CRUD support. It also provides recipe-based prompt assembly and a file-level permission sandbox.
+better-subagent is a **Dialogue Memory Database**. It provides structured conversation persistence: storing conversation turns, tool call records, templates, file references, and call records as JSONL files with full CRUD support. It also provides recipe-based prompt assembly.
 
 ---
 
@@ -32,10 +32,8 @@ index.ts                 # Entry: dual export (PI extension + core API)
 │   └── toml.ts          #   TOML read/write (smol-toml)
 ├── tool/                # PI integration layer
 │   ├── dialogue-memory.ts  # Tool registration (dialogue_memory)
-│   ├── permissions.ts      # File-level permission sandbox
 │   └── actions/            # Action handlers (load/save/query/manage)
 ├── skills/              # PI skill definitions
-├── .profiles/           # User-authored profiles
 └── docs/                # Documentation
 ```
 
@@ -73,18 +71,17 @@ Import named functions directly from `index.ts`:
 | `listTurns(tablePath)` | List all turns (convenience wrapper for `queryTurns(path, {})`) |
 | `findRecentTurns(dirPath, limit)` | Return last N turns across all JSONL files in a directory |
 | `appendToolCall / getToolCall / queryToolCalls / updateToolCall` | Tool call CRUD |
-| `appendTemplate / getTemplate / queryTemplates / updateTemplate` | Template CRUD (with permission fields) |
+| `appendTemplate / getTemplate / queryTemplates / updateTemplate` | Template CRUD |
 | `appendFileRef / getFileRef / queryFileRefs / updateFileRef` | File reference CRUD |
 | `appendCallRecord / getCallRecord / queryCallRecords / updateCallRecord` | Call record CRUD |
 | `loadRecipes / getRecipe / addRecipe / updateRecipe` | Recipe TOML CRUD |
 | `buildPrompt(recipePath, callRecord, resolver)` | Build a prompt from recipe zones |
 | `buildPromptFromRecipe(recipe, callRecord, resolver)` | Build a prompt from an already-loaded recipe |
-| `setPermissions / clearPermissions / checkRead / checkWrite / getPermissions` | Permission sandbox |
 
 ### API Usage Examples
 
 ```typescript
-import { appendTurn, queryTurns, setPermissions } from "better-subagent";
+import { appendTurn, queryTurns } from "better-subagent";
 
 // Save a turn
 await appendTurn(tablePath, "turn-001", "/path/to/turn.md", {
@@ -101,30 +98,7 @@ const allTurns = await listTurns(tablePath);
 
 // Find recent turns
 const recent = await findRecentTurns("/data/turns", 10);
-
-// Permission sandbox — positional form
-setPermissions(["/project/**"], ["/project/output/**"], ["/project/secrets/**"]);
-
-// Permission sandbox — object form (all fields optional)
-setPermissions({
-  readPaths: ["/project/**"],
-  denyPaths: ["/project/secrets/**"],
-});
-
-// Check permissions
-const result = checkRead("/project/secrets/key.pem"); // { allowed: false, reason: "..." }
 ```
-
----
-
-## Permission Sandbox Rules
-
-1. `null` / unset → open mode (allow everything)
-2. `denyPaths` match → always block (deny takes precedence)
-3. Non-empty allow list → path must match at least one allow pattern
-4. Empty allow list → allow all (except deny matches)
-
-The permission state is module-level mutable — it resets on process restart.
 
 ---
 
@@ -158,7 +132,6 @@ separator_after = "---end-history---"
 
 - **Core purity**: `core/` modules are pure functions with zero PI dependency and zero I/O — all I/O is delegated to `utils/`.
 - **Atomic writes**: JSONL files use `.tmp` + rename for crash safety.
-- **Permission state**: Module-level mutable — resets on process restart.
 - **TypeScript strictness**: `tsconfig` enables `exactOptionalPropertyTypes` and `verbatimModuleSyntax` — use `import type` for type-only imports, no `as any`, no `@ts-ignore`.
 - **Test layout**: Test files live next to their source files (e.g., `core/turns.test.ts`).
 - **PI extension deployment**: Via symlink: `ln -s $(pwd) ~/.pi/agent/extensions/better-subagent`.

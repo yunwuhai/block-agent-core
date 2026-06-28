@@ -22,5 +22,4 @@ export { appendCallRecord, getCallRecord, queryCallRecords, updateCallRecord } f
 export { loadRecipes, getRecipe, addRecipe, updateRecipe } from "./core/recipes.ts";
 export { buildPrompt, buildPromptFromRecipe } from "./core/build-prompt.ts";
 export { saveTurn } from "./core/save-turn.ts";
-export { setPermissions, clearPermissions, checkRead, checkWrite, getPermissions } from "./tool/permissions.ts";
 export type * from "./core/types.ts";

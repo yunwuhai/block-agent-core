@@ -6,7 +6,7 @@
 
 ## 项目是什么
 
-better-subagent 是一个**对话记忆数据库（Dialogue Memory Database）**。它提供结构化的对话持久化能力：将对话轮次（turns）、工具调用记录（tool calls）、模板（templates）、文件引用（file refs）和调用记录（call records）以 JSONL 格式存储，支持 CRUD 操作。此外，它提供基于配方的提示词拼装（prompt building）和文件级权限沙箱。
+better-subagent 是一个**对话记忆数据库（Dialogue Memory Database）**。它提供结构化的对话持久化能力：将对话轮次（turns）、工具调用记录（tool calls）、模板（templates）、文件引用（file refs）和调用记录（call records）以 JSONL 格式存储，支持 CRUD 操作。此外，它提供基于配方的提示词拼装（prompt building）。
 
 ---
 
@@ -32,10 +32,8 @@ index.ts                 # 入口：双导出（PI 扩展 + 核心 API）
 │   └── toml.ts          #   TOML 读写
 ├── tool/                # PI 集成层
 │   ├── dialogue-memory.ts  # 工具注册（dialogue_memory）
-│   ├── permissions.ts      # 文件级权限沙箱
 │   └── actions/            # 动作处理（load/save/query/manage）
 ├── skills/              # PI skill 定义
-├── .profiles/           # 用户定义的 profile
 └── docs/                # 文档
 ```
 
@@ -78,41 +76,6 @@ index.ts                 # 入口：双导出（PI 扩展 + 核心 API）
 | `appendCallRecord / getCallRecord / queryCallRecords / updateCallRecord` | 调用记录 CRUD |
 | `loadRecipes / getRecipe / addRecipe / updateRecipe` | 配方 CRUD |
 | `buildPrompt / buildPromptFromRecipe` | 提示词拼装 |
-| `setPermissions / clearPermissions / checkRead / checkWrite / getPermissions` | 权限沙箱 |
-
-### API 使用示例
-
-```typescript
-import { appendTurn, queryTurns, setPermissions } from "better-subagent";
-
-// 保存一个轮次
-await appendTurn(tablePath, "turn-001", "/path/to/turn.md", {
-  userText: "Write a function to calculate fibonacci numbers",
-  assistantBlocks: [{ type: "text", text: "..." }],
-  tags: ["math"],
-});
-
-// 查询
-const turns = await queryTurns(tablePath, { tags: ["math"] });
-
-// 权限沙箱 — 位置形式
-setPermissions(["/project/**"], ["/project/output/**"], ["/project/secrets/**"]);
-
-// 权限沙箱 — 对象形式（字段均可选）
-setPermissions({
-  readPaths: ["/project/**"],
-  denyPaths: ["/project/secrets/**"],
-});
-```
-
----
-
-## 权限沙箱规则
-
-1. `null` — 开放模式（允许一切访问）
-2. denyPaths 匹配 → 始终阻止（拒绝优先于允许）
-3. 非空 allow 列表 → 路径必须匹配至少一个 allow 模式
-4. 空 allow 列表 → 允许所有（除被 deny 匹配的路径外）
 
 ---
 
@@ -146,7 +109,6 @@ separator_after = "---end-history---"
 
 - `core/` 模块零 PI 依赖、零 I/O — I/O 通过 `utils/` 委托
 - JSONL 文件使用原子写入（.tmp + rename）确保崩溃安全
-- 权限状态是模块级可变的 — 进程重启后重置
 - `tsconfig` 启用 `exactOptionalPropertyTypes` 和 `verbatimModuleSyntax`
 
 ---
