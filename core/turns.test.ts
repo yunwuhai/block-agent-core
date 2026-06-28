@@ -23,7 +23,7 @@ describe("appendTurn", () => {
     const record = await appendTurn(tablePath, "turn-001", join(tmpDir, "turn-001.md"), sampleTurn);
     expect(record.id).toBe("turn-001");
     expect(record.path).toContain("turn-001.md");
-    expect(record.handoff).toBe("");
+    expect(record.handoff).toBe("Write a function to query users");
     expect(record.tags).toEqual([]);
   });
 });

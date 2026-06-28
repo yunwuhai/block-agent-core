@@ -12,8 +12,11 @@ dist/
 registry.jsonl
 registry-calls.jsonl
 
-# Development / workflow test data
-data/
+# PI runtime data (user config, not source)
+.profiles/
+.superpowers/
+
+# Development / workflow tool data
 .omo/
 .opencode/
 .codex/

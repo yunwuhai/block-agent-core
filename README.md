@@ -1,82 +1,48 @@
-# Efficiency Subagent
+# Better Subagent
 
-Lightweight controllable subagent plugin for PI Coding Agent. Profile-based invocation with durable sessions, structured handoff, dynamic prompt slots, and permission enforcement.
+PI Coding Agent 扩展 — 提供**结构化对话记忆数据库**和**受控子代理调用**能力。
 
-## Features
+## 能做什么
 
-- **Profile-based invocation**: invoke subagents by profile name plus task
-- **Durable sessions**: every run creates `.pi/subagents/runs/<run-id>/` with JSONL facts, tool logs, transcript, and handoff
-- **Structured handoff**: generated after the configured action sequence, appended at a stable location
-- **Dynamic prompt slots**: set, clear, list, push, pop, once, and TTL operations; all mutations logged
-- **Permission enforcement**: strong blocking for tool names, file paths, bash commands, network access, env vars, and nested subagent calls
+- **对话记忆持久化** — 每轮对话、工具调用、文件引用存成结构化记录（JSONL + Markdown）
+- **上下文按需拼装** — 通过 Recipe 方案定义组装规则，加载时只注入需要的上下文，避免 prompt 膨胀
+- **文件级权限沙箱** — 模板中声明 `allowReadPaths` / `allowWritePaths` / `denyPaths`，加载后自动拦截 read/write/edit 调用
+- **子代理调用** — 通过 `efficiency_subagent` 工具以 profile 控制子代理的工具权限和上下文注入
 
-## Install
-
-```bash
-rm -rf ~/.pi/agent/extensions/efficiency-subagent
-ln -s "$(pwd)/efficiency-subagent" ~/.pi/agent/extensions/efficiency-subagent
-```
-
-Or load ad-hoc:
+## 安装
 
 ```bash
-pi --extension ./efficiency-subagent/index.ts "Use efficiency subagent with profile worker, task 'list files'"
+rm -rf ~/.pi/agent/extensions/better-subagent
+ln -s "$(pwd)" ~/.pi/agent/extensions/better-subagent
 ```
 
-## Usage
+安装后 PI 会自动加载以下内容：
+- `skills/better-subagent/SKILL.md` — 子代理调用 skill，教 agent 如何使用 `efficiency_subagent` 工具
+- `index.ts` — 注册 `dialogue_memory` 工具（load / save / query / manage）和权限拦截器
 
-```json
-{
-  "profile": "worker",
-  "task": "Implement the login endpoint"
-}
-```
-
-Optional:
-
-```json
-{
-  "profile": "worker",
-  "task": "Continue previous work",
-  "runId": "abc123def456"
-}
-```
-
-## Directory layout
+## 项目结构
 
 ```
-efficiency-subagent/
-├── index.ts              Extension entry point, registers "efficiency_subagent" tool
-├── backend/input/        Tool params schema, profile/project config types
-├── backend/storage/      JSONL event log and run directories
-├── backend/output/       Handoff and transcript generation
-├── backend/computation/  Policy, prompt, and registry computation
-├── frontend/operation/   Run orchestration and tool simulation
-└── docs/                 L1/L2/L3 architecture and user manuals
+better-subagent/
+├── index.ts              # PI 扩展入口 + 纯函数 API 导出
+├── core/                 # 引擎层 — 零 PI 依赖的纯函数
+│   ├── turns.ts          #   对话轮次 CRUD
+│   ├── tool-calls.ts     #   工具调用记录
+│   ├── templates.ts      #   模板 + 权限字段
+│   ├── file-refs.ts      #   文件引用记录
+│   ├── call-records.ts   #   调用串联记录
+│   ├── recipes.ts        #   组装方案（TOML）
+│   ├── build-prompt.ts   #   提示词拼装引擎
+│   └── save-turn.ts      #   一键保存编排
+├── utils/                # JSONL / TOML / Glob 工具
+├── tool/                 # Agent 适配层 — PI 工具注册 + 权限拦截
+├── skills/               # PI 自动发现的 skill
+└── docs/                 # 文档
 ```
 
-## Testing
+## 开发
 
 ```bash
-cd efficiency-subagent
-bun test
+bun test          # 运行测试
+tsc --noEmit      # 类型检查
 ```
-
-Requires `bun`, `zod`, and access to `@earendil-works/pi-coding-agent` (symlinked from PI global install).
-
-## Real surface QA
-
-```bash
-pi --extension ./efficiency-subagent/index.ts --mode json -p "Use efficiency subagent with profile test, task smoke"
-```
-
-Requires configured API credentials. Without them, the full test suite provides equivalent coverage.
-
-## Not included
-
-- No workflow engine
-- No planner-router graph orchestration
-- No lifecycle script system
-- No frontend display/TUI renderer (temporarily removed for redesign)
-- No OS/container sandbox (MVP uses PI extension-level guard)
-- No bundled profiles (user config only)

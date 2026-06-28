@@ -20,6 +20,8 @@ export interface TurnInput {
   userText: string;
   /** AI 回复块序列 */
   assistantBlocks: AssistantBlock[];
+  /** Optional tags for filtering and categorization */
+  tags?: string[];
 }
 
 export type AssistantBlock =

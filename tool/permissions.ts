@@ -33,13 +33,44 @@ let currentPermissions: PermissionSets | null = null;
 // Public API
 // ---------------------------------------------------------------------------
 
-/** Store the merged permission sets from loaded templates. */
+/** Store the merged permission sets from loaded templates.
+ *
+ * Accepts either positional args or an options object:
+ *   setPermissions(readPaths, writePaths, denyPaths)
+ *   setPermissions({ readPaths?, writePaths?, denyPaths? })
+ */
 export function setPermissions(
   readPaths: string[],
   writePaths: string[],
   denyPaths: string[],
+): void;
+export function setPermissions(options: {
+  readPaths?: string[];
+  writePaths?: string[];
+  denyPaths?: string[];
+}): void;
+export function setPermissions(
+  readPathsOrOptions:
+    | string[]
+    | { readPaths?: string[]; writePaths?: string[]; denyPaths?: string[] },
+  writePaths?: string[],
+  denyPaths?: string[],
 ): void {
-  currentPermissions = { readPaths, writePaths, denyPaths };
+  if (Array.isArray(readPathsOrOptions)) {
+    // Positional form
+    currentPermissions = {
+      readPaths: readPathsOrOptions,
+      writePaths: writePaths ?? [],
+      denyPaths: denyPaths ?? [],
+    };
+  } else {
+    // Options object form
+    currentPermissions = {
+      readPaths: readPathsOrOptions.readPaths ?? [],
+      writePaths: readPathsOrOptions.writePaths ?? [],
+      denyPaths: readPathsOrOptions.denyPaths ?? [],
+    };
+  }
 }
 
 /** Clear permission state (reset to open mode). */

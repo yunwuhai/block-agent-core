@@ -14,7 +14,7 @@ export default async function (pi: import("@earendil-works/pi-coding-agent").Ext
 }
 
 // Named exports: core API (zero PI dependency)
-export { appendTurn, getTurn, queryTurns, updateTurn } from "./core/turns.ts";
+export { appendTurn, getTurn, queryTurns, updateTurn, listTurns, findRecentTurns } from "./core/turns.ts";
 export { appendToolCall, getToolCall, queryToolCalls, updateToolCall } from "./core/tool-calls.ts";
 export { appendTemplate, getTemplate, queryTemplates, updateTemplate } from "./core/templates.ts";
 export { appendFileRef, getFileRef, queryFileRefs, updateFileRef } from "./core/file-refs.ts";
@@ -22,4 +22,5 @@ export { appendCallRecord, getCallRecord, queryCallRecords, updateCallRecord } f
 export { loadRecipes, getRecipe, addRecipe, updateRecipe } from "./core/recipes.ts";
 export { buildPrompt, buildPromptFromRecipe } from "./core/build-prompt.ts";
 export { saveTurn } from "./core/save-turn.ts";
+export { setPermissions, clearPermissions, checkRead, checkWrite, getPermissions } from "./tool/permissions.ts";
 export type * from "./core/types.ts";

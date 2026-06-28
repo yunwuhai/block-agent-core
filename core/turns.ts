@@ -1,3 +1,5 @@
+import { readdir } from "node:fs/promises";
+import { join } from "node:path";
 import { readJsonl, appendJsonl, updateJsonl } from "../utils/jsonl.ts";
 import type { TurnInput, TurnRecord, TurnFilter } from "./types.ts";
 
@@ -9,13 +11,13 @@ export async function appendTurn(
   tablePath: string,
   id: string,
   turnMdPath: string,
-  _turn: TurnInput,
+  turn: TurnInput,
 ): Promise<TurnRecord> {
   const record: TurnRecord = {
     id,
     path: turnMdPath,
-    handoff: "",
-    tags: [],
+    handoff: turn.userText.slice(0, 80),
+    tags: turn.tags ?? [],
   };
   await appendJsonl(tablePath, record);
   return record;
@@ -63,4 +65,45 @@ export async function updateTurn(
   patch: Partial<TurnRecord>,
 ): Promise<boolean> {
   return updateJsonl<TurnRecord>(tablePath, id, patch);
+}
+
+/**
+ * List all turn records from a table.
+ * Convenience wrapper around queryTurns(tablePath, {}).
+ */
+export async function listTurns(tablePath: string): Promise<TurnRecord[]> {
+  return queryTurns(tablePath, {});
+}
+
+/**
+ * Find the most recent N turn records across all JSONL files in a directory.
+ *
+ * Scans for `*.jsonl` files under `dirPath`, reads all turns from each file,
+ * flattens them into one array (preserving append order within each file,
+ * processing files in alphabetical order), and returns the last `limit` entries.
+ */
+export async function findRecentTurns(
+  dirPath: string,
+  limit: number,
+): Promise<TurnRecord[]> {
+  let files: string[];
+  try {
+    files = (await readdir(dirPath))
+      .filter(f => f.endsWith(".jsonl"))
+      .map(f => join(dirPath, f));
+  } catch {
+    return [];
+  }
+
+  const allTurns: TurnRecord[] = [];
+  for (const file of files) {
+    try {
+      const records = await readJsonl<TurnRecord>(file);
+      allTurns.push(...records);
+    } catch {
+      // Skip unreadable files
+    }
+  }
+
+  return allTurns.slice(-limit);
 }
