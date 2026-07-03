@@ -1,45 +1,44 @@
-import { readJsonl, appendJsonl, updateJsonl } from "../utils/jsonl.ts";
+import { createCrudModule } from "./crud-factory.ts";
 import type { CallRecordInput, CallRecord, CallRecordFilter } from "./types.ts";
+
+// ---------------------------------------------------------------------------
+// CRUD factory — replaces the previous inline append/get/query/update
+// ---------------------------------------------------------------------------
+const crud = createCrudModule<CallRecord, CallRecordInput, CallRecordFilter>(
+  "call-record",
+  (id, input) => ({
+    id,
+    turnId: input.turnId,
+    recipeId: input.recipeId,
+    zones: input.zones,
+  }),
+  (record, filter) => {
+    if (filter.turnId && record.turnId !== filter.turnId) return false;
+    if (filter.recipeId && record.recipeId !== filter.recipeId) return false;
+    return true;
+  },
+);
 
 export async function appendCallRecord(
   tablePath: string,
   id: string,
   rec: CallRecordInput,
 ): Promise<CallRecord> {
-  const record: CallRecord = {
-    id,
-    turnId: rec.turnId,
-    recipeId: rec.recipeId,
-    zones: rec.zones,
-  };
-  await appendJsonl(tablePath, record);
-  return record;
+  return crud.append(tablePath, id, rec);
 }
 
 export async function getCallRecord(
   tablePath: string,
   id: string,
 ): Promise<CallRecord | null> {
-  const records = await readJsonl<CallRecord>(tablePath);
-  return records.find(r => r.id === id) ?? null;
+  return crud.get(tablePath, id);
 }
 
 export async function queryCallRecords(
   tablePath: string,
   filter: CallRecordFilter,
 ): Promise<CallRecord[]> {
-  let records = await readJsonl<CallRecord>(tablePath);
-  if (filter.ids && filter.ids.length > 0) {
-    const idSet = new Set(filter.ids);
-    records = records.filter(r => idSet.has(r.id));
-  }
-  if (filter.turnId) {
-    records = records.filter(r => r.turnId === filter.turnId);
-  }
-  if (filter.recipeId) {
-    records = records.filter(r => r.recipeId === filter.recipeId);
-  }
-  return records;
+  return crud.query(tablePath, filter);
 }
 
 export async function updateCallRecord(
@@ -47,5 +46,5 @@ export async function updateCallRecord(
   id: string,
   patch: Partial<CallRecord>,
 ): Promise<boolean> {
-  return updateJsonl<CallRecord>(tablePath, id, patch);
+  return crud.update(tablePath, id, patch);
 }

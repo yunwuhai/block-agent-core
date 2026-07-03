@@ -38,29 +38,33 @@ export async function handleLoad(
   params: LoadParams,
   _ctx: ExtensionContext,
 ): Promise<{ content: Array<{ type: "text"; text: string }>; details: unknown }> {
-  const records = await readJsonl<CallRecord>(params.callRecordPath);
-  const callRecord = params.recipeId
-    ? records.find(r => r.recipeId === params.recipeId)
-    : records[records.length - 1];
+  try {
+    const records = await readJsonl<CallRecord>(params.callRecordPath);
+    const callRecord = params.recipeId
+      ? records.find(r => r.recipeId === params.recipeId)
+      : records[records.length - 1];
 
-  if (!callRecord) {
-    return { content: [{ type: "text", text: `Error: No call record found in ${params.callRecordPath}` }], details: {} as any };
-  }
+    if (!callRecord) {
+      return { content: [{ type: "text", text: `Error: No call record found in ${params.callRecordPath}` }], details: {} as any };
+    }
 
-  const refContents = new Map<string, string>();
-  for (const zoneRefs of Object.values(callRecord.zones)) {
-    for (const ref of zoneRefs) {
-      const key = `${ref.file}:${ref.id}:${ref.mode ?? "full"}:${ref.lines ?? ""}`;
-      if (!refContents.has(key)) {
-        refContents.set(key, await defaultResolver(ref));
+    const refContents = new Map<string, string>();
+    for (const zoneRefs of Object.values(callRecord.zones)) {
+      for (const ref of zoneRefs) {
+        const key = `${ref.file}:${ref.id}:${ref.mode ?? "full"}:${ref.lines ?? ""}`;
+        if (!refContents.has(key)) {
+          refContents.set(key, await defaultResolver(ref));
+        }
       }
     }
+
+    const resolver = (ref: Ref): string =>
+      refContents.get(`${ref.file}:${ref.id}:${ref.mode ?? "full"}:${ref.lines ?? ""}`)
+      ?? `[unresolved: ${ref.id}]`;
+
+    const prompt = await buildPrompt(params.recipePath, callRecord, resolver);
+    return { content: [{ type: "text", text: prompt }], details: {} as any };
+  } catch (err) {
+    return { content: [{ type: "text", text: `Error: ${(err as Error).message}` }], details: {} as any };
   }
-
-  const resolver = (ref: Ref): string =>
-    refContents.get(`${ref.file}:${ref.id}:${ref.mode ?? "full"}:${ref.lines ?? ""}`)
-    ?? `[unresolved: ${ref.id}]`;
-
-  const prompt = await buildPrompt(params.recipePath, callRecord, resolver);
-  return { content: [{ type: "text", text: prompt }], details: {} as any };
 }

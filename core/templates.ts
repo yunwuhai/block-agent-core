@@ -1,6 +1,19 @@
-// core/templates.ts
-import { readJsonl, appendJsonl, updateJsonl } from "../utils/jsonl.ts";
+import { createCrudModule } from "./crud-factory.ts";
 import type { TemplateInput, TemplateRecord, TemplateFilter } from "./types.ts";
+
+// ---------------------------------------------------------------------------
+// CRUD factory — replaces the previous inline append/get/query/update
+// ---------------------------------------------------------------------------
+const crud = createCrudModule<TemplateRecord, TemplateInput, TemplateFilter>(
+  "template",
+  (id, input, extra) => ({
+    id,
+    path: extra as string,
+    tags: input.tags ?? [],
+  }),
+  (record, filter) =>
+    !filter.tags?.length || record.tags.some(t => filter.tags!.includes(t)),
+);
 
 export async function appendTemplate(
   tablePath: string,
@@ -8,38 +21,21 @@ export async function appendTemplate(
   templateMdPath: string,
   tmpl: TemplateInput,
 ): Promise<TemplateRecord> {
-  const record: TemplateRecord = {
-    id,
-    path: templateMdPath,
-    tags: tmpl.tags ?? [],
-  };
-  await appendJsonl(tablePath, record);
-  return record;
+  return crud.append(tablePath, id, tmpl, templateMdPath);
 }
 
 export async function getTemplate(
   tablePath: string,
   id: string,
 ): Promise<TemplateRecord | null> {
-  const records = await readJsonl<TemplateRecord>(tablePath);
-  return records.find(r => r.id === id) ?? null;
+  return crud.get(tablePath, id);
 }
 
 export async function queryTemplates(
   tablePath: string,
   filter: TemplateFilter,
 ): Promise<TemplateRecord[]> {
-  let records = await readJsonl<TemplateRecord>(tablePath);
-  if (filter.ids && filter.ids.length > 0) {
-    const idSet = new Set(filter.ids);
-    records = records.filter(r => idSet.has(r.id));
-  }
-  if (filter.tags && filter.tags.length > 0) {
-    records = records.filter(r =>
-      r.tags.some(t => filter.tags!.includes(t)),
-    );
-  }
-  return records;
+  return crud.query(tablePath, filter);
 }
 
 export async function updateTemplate(
@@ -47,5 +43,5 @@ export async function updateTemplate(
   id: string,
   patch: Partial<TemplateRecord>,
 ): Promise<boolean> {
-  return updateJsonl<TemplateRecord>(tablePath, id, patch);
+  return crud.update(tablePath, id, patch);
 }
