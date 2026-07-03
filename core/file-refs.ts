@@ -1,52 +1,48 @@
-// core/file-refs.ts
-import { readJsonl, appendJsonl, updateJsonl } from "../utils/jsonl.ts";
+import { createCrudModule } from "./crud-factory.ts";
 import { matchGlob } from "../utils/glob.ts";
 import type { FileRefInput, FileRefRecord, FileRefFilter } from "./types.ts";
+
+// ---------------------------------------------------------------------------
+// CRUD factory — replaces the previous inline append/get/query/update
+// ---------------------------------------------------------------------------
+const crud = createCrudModule<FileRefRecord, FileRefInput, FileRefFilter>(
+  "file-ref",
+  (id, input) => ({
+    id,
+    filePath: input.filePath,
+    turnId: input.turnId,
+    toolCallId: input.toolCallId,
+    accessType: input.accessType,
+    handoff: input.handoff ?? "",
+  }),
+  (record, filter) => {
+    if (filter.turnId && record.turnId !== filter.turnId) return false;
+    if (filter.accessType && record.accessType !== filter.accessType) return false;
+    if (filter.filePath && !matchGlob(filter.filePath, record.filePath)) return false;
+    return true;
+  },
+);
 
 export async function appendFileRef(
   tablePath: string,
   id: string,
   ref: FileRefInput,
 ): Promise<FileRefRecord> {
-  const record: FileRefRecord = {
-    id,
-    filePath: ref.filePath,
-    turnId: ref.turnId,
-    toolCallId: ref.toolCallId,
-    accessType: ref.accessType,
-    handoff: ref.handoff ?? "",
-  };
-  await appendJsonl(tablePath, record);
-  return record;
+  return crud.append(tablePath, id, ref);
 }
 
 export async function getFileRef(
   tablePath: string,
   id: string,
 ): Promise<FileRefRecord | null> {
-  const records = await readJsonl<FileRefRecord>(tablePath);
-  return records.find(r => r.id === id) ?? null;
+  return crud.get(tablePath, id);
 }
 
 export async function queryFileRefs(
   tablePath: string,
   filter: FileRefFilter,
 ): Promise<FileRefRecord[]> {
-  let records = await readJsonl<FileRefRecord>(tablePath);
-  if (filter.ids && filter.ids.length > 0) {
-    const idSet = new Set(filter.ids);
-    records = records.filter(r => idSet.has(r.id));
-  }
-  if (filter.turnId) {
-    records = records.filter(r => r.turnId === filter.turnId);
-  }
-  if (filter.accessType) {
-    records = records.filter(r => r.accessType === filter.accessType);
-  }
-  if (filter.filePath) {
-    records = records.filter(r => matchGlob(filter.filePath!, r.filePath));
-  }
-  return records;
+  return crud.query(tablePath, filter);
 }
 
 export async function updateFileRef(
@@ -54,5 +50,5 @@ export async function updateFileRef(
   id: string,
   patch: Partial<FileRefRecord>,
 ): Promise<boolean> {
-  return updateJsonl<FileRefRecord>(tablePath, id, patch);
+  return crud.update(tablePath, id, patch);
 }

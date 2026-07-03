@@ -17,12 +17,13 @@ The project has a flat two-layer structure (`core/` + `tool/` + `utils/`), with 
 ```
 index.ts                 # Entry: dual export (PI extension + core API)
 ├── core/                # Core layer — pure functions, zero PI dependency
+│   ├── crud-factory.ts  #   Generic CRUD factory (eliminates 5-module duplication)
 │   ├── types.ts         #   Shared types (TurnInput, Record, etc.)
-│   ├── turns.ts         #   Conversation turn CRUD
-│   ├── tool-calls.ts    #   Tool call record CRUD
-│   ├── templates.ts     #   Template CRUD
-│   ├── file-refs.ts     #   File reference CRUD
-│   ├── call-records.ts  #   Call record CRUD
+│   ├── turns.ts         #   Conversation turn CRUD (via crud-factory)
+│   ├── tool-calls.ts    #   Tool call record CRUD (via crud-factory)
+│   ├── templates.ts     #   Template CRUD (via crud-factory)
+│   ├── file-refs.ts     #   File reference CRUD (via crud-factory)
+│   ├── call-records.ts  #   Call record CRUD (via crud-factory)
 │   ├── recipes.ts       #   Recipe TOML loader + CRUD
 │   ├── build-prompt.ts  #   Prompt assembly from recipe zones
 │   └── save-turn.ts     #   Orchestrator: atomic save (.md + 4 JSONL tables)
@@ -128,6 +129,45 @@ separator_after = "---end-history---"
 
 ---
 
+## Internal Architecture (Post-Simplification)
+
+### Generic CRUD Factory (`core/crud-factory.ts`)
+
+Five nearly identical CRUD modules (turns, tool-calls, templates, file-refs, call-records) have been unified via `createCrudModule<Record, Input, Filter>(tableName, buildRecord, filterFn)`. Each module is now a thin re-export layer over the factory, preserving the exact same public API.
+
+**Factory API:**
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `append` | `(tablePath, id, input, extra?) => Promise<Record>` | Build and write a record |
+| `get` | `(tablePath, id) => Promise<Record \| null>` | Lookup by ID |
+| `query` | `(tablePath, filter) => Promise<Record[]>` | Filter with built-in `ids` + custom `filterFn` |
+| `update` | `(tablePath, id, patch) => Promise<boolean>` | Atomic patch |
+| `list` | `(tablePath) => Promise<Record[]>` | Read all records |
+
+### Registry Pattern in `tool/actions/`
+
+Both `manage.ts` and `query.ts` replaced large switch statements with **registry objects** that map table names to handler functions:
+
+- `manage.ts`: `registry[tableName][op]` — 6 tables × 4 ops, the `jsonlHandlers()` factory generates standard handlers for JSONL-backed tables, while `recipes` registers specialized TOML handlers.
+- `query.ts`: `queryRegistry[tableName]` — each table maps directly to its query function.
+
+Adding a new table type requires only one new entry in the registry.
+
+### Save Turn — Backward-Compatible Simplification
+
+`saveTurn()` params support two formats:
+- **Flat** (original): 14 individual fields like `turnsPath`, `turnId`, etc.
+- **Grouped** (new): `{ paths: { turnsPath, turnMdPath, ... }, ids: { turnId, toolCallIds, ... }, ... }`
+
+Both work identically. A `normalizeParams()` function converts either format to a common internal shape. An extracted `sequentialId(prefix, index)` helper replaces the previously inline `padStart(3, "0")` pattern.
+
+### `ok(text)` Helper
+
+All tool action handlers now use a shared `ok(text)` helper returning `{ content: [{ type: "text", text }], details: {} }`, eliminating ~30 occurrences of this boilerplate.
+
+---
+
 ## Key Constraints
 
 - **Core purity**: `core/` modules are pure functions with zero PI dependency and zero I/O — all I/O is delegated to `utils/`.
@@ -141,4 +181,11 @@ separator_after = "---end-history---"
 ## Further Reading
 
 - **L1 file docs**: `docs/L1-files/` — Per-file source-level documentation with line references
+  - `core-crud-factory.md` — Generic CRUD factory
+  - `core-save-turn.md` — Save-turn orchestrator
+  - `tool-actions-load.md` — Load action handler
+  - `tool-actions-manage.md` — Manage action handler (registry pattern)
+  - `tool-actions-query.md` — Query action handler (registry pattern)
+  - `tool-actions-save.md` — Save action handler
+  - `tool-dialogue-memory.md` — Tool registration
 - **Source code**: Modules in `core/` export clearly named functions with JSDoc comments — readable directly.

@@ -24,7 +24,7 @@ tsc --noEmit      # 类型检查
 
 ## 架构速览
 
-- `core/` — Pure function layer (zero PI dependency, zero I/O). Turn CRUD, tool-call records, templates, file references, call records, recipes (TOML), prompt building, save-turn orchestration, and shared types.
+- `core/` — Pure function layer (zero PI dependency, zero I/O). A generic `crud-factory.ts` provides reusable CRUD logic for 5 entity types (turns, tool-calls, templates, file-refs, call-records). Also includes recipes (TOML), prompt building, save-turn orchestration, and shared types.
 - `tool/` — PI integration layer. Dialogue memory tool registration + action handlers (`actions/`).
 - `utils/` — Shared helpers: JSONL file I/O (read, append, update, delete with atomic writes), glob pattern matching, TOML I/O.
 - `index.ts` — Dual export: default (PI extension factory) + named (core CRUD API).
@@ -33,7 +33,7 @@ tsc --noEmit      # 类型检查
 ## 关键约束
 
 - `tsconfig` 有 `exactOptionalPropertyTypes: true`、`verbatimModuleSyntax: true` — 不能用 `import X` 导入 type，必须 `import type`
-- 禁止 `as any`、`@ts-ignore`、`@ts-expect-error`
+- `core/` 层禁止 `as any`、`@ts-ignore`、`@ts-expect-error`（`tool/` 适配层必要时可用 `as any`）
 - 测试文件与源文件同目录（如 `core/turns.test.ts`）
 - PI 扩展通过 symlink 部署：`ln -s $(pwd) ~/.pi/agent/extensions/better-subagent`
 - **Core purity**: `core/` modules must never import `fs`, `path`, or perform I/O. I/O is delegated to `utils/`.
