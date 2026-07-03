@@ -1,20 +1,27 @@
+# Dependencies
 node_modules/
+
+# Build output
 dist/
 *.tsbuildinfo
 
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+
 # PI runtime data
 .pi/
+registry.jsonl
+registry-calls.jsonl
+.profiles/
+.superpowers/
 
 # Claude Code config
 .claude/
-
-# Prompt Registry runtime data
-registry.jsonl
-registry-calls.jsonl
-
-# PI runtime data (user config, not source)
-.profiles/
-.superpowers/
 
 # Development / workflow tool data
 .omo/
@@ -22,6 +29,11 @@ registry-calls.jsonl
 .codex/
 .codegraph/
 
-# OS files
+# Editor & OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 .DS_Store
 Thumbs.db
