@@ -1,10 +1,11 @@
 import { describe, it, expect, afterAll } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendTurn, getTurn, queryTurns, updateTurn } from "./turns.ts";
 import type { TurnInput } from "./types.ts";
 
-const tmpDir = mkdtempSync("/tmp/turns-test-");
+const tmpDir = mkdtempSync(join(tmpdir(), "turns-test-"));
 const tablePath = join(tmpDir, "turns.jsonl");
 
 afterAll(() => {

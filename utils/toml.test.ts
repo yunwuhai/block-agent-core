@@ -1,9 +1,10 @@
 import { describe, it, expect, afterAll } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readToml, writeToml } from "./toml.ts";
 
-const tmpDir = mkdtempSync("/tmp/toml-test-");
+const tmpDir = mkdtempSync(join(tmpdir(), "toml-test-"));
 
 afterAll(() => {
   rmSync(tmpDir, { recursive: true, force: true });

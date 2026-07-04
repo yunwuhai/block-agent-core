@@ -1,55 +1,46 @@
 # Better Subagent
 
-`better-subagent` is a PI Coding Agent extension for running an external subagent with reusable context loading and structured result archiving.
+`better-subagent` is evolving into `block_agent_core`: a PI Coding Agent extension for block-based context assembly, PI SDK subagent execution, and structured result archiving.
 
-## Recommended design
+## What it does
 
-Treat the project as three parts:
+The new system is built around four extension-facing actions:
 
-1. Context loading
-   Load context fragments from JSONL history or files, then concatenate them in caller-provided order.
-2. PI invocation preparation
-   Build the final prompt and execution config that will be sent to PI Coding Agent.
-3. Result archiving
-   Persist tool calls, reasoning, replies, and external file accesses in separate storage shapes for later reuse.
+- `load_context`
+  Compose context blocks from JSONL fields and file slices.
+- `run_subagent`
+  Run a PI SDK-backed subagent with explicit input text, model selection, tool selection, turn identity, and default archiving.
+- `list_models`
+  Inspect PI models that are known and currently available.
+- `archive_result`
+  Persist reasoning, replies, tool calls, and external file access records through the default archive module.
 
-## What the project should and should not do
+## Internal shape
 
-- It should provide a basic JSONL field loader: choose a file, choose keys, optionally choose record IDs, then concatenate.
-- It should provide a file loader and a loader registry so third parties can register richer source types later.
-- It should provide a basic archive layout for tool calls, messages, and file access registration.
-- It should not decide when to load which context. That policy belongs to callers and tests built on top of the library.
-
-## Storage layout
-
-- `messages.jsonl`
-  Stores both `reasoning` and `reply` records in append order.
-- `tool-calls/`
-  Stores each tool call as its own JSON file, linked to the related message ID.
-- `external-files.jsonl`
-  Registers file read/write accesses without copying file content into the archive.
-
-## Recommended APIs
+The implementation is centered on:
 
 - `core/context-sources.ts`
-  Context loaders and loader registry.
-- `core/pi-config.ts`
-  Prompt and invocation config builders.
-- `core/archive-store.ts`
-  Structured result archiving.
+  Context block loaders and loader registry.
 - `core/subagent-run.ts`
-  Run request, tool selection, model selection, and turn-id helpers.
+  Turn identity, model selection, and tool selection primitives.
+- `core/pi-config.ts`
+  Prompt and invocation builders.
 - `adapter/pi-sdk.ts`
-  PI SDK adapter built on `createAgentSession()`, `ModelRegistry`, and `SessionManager.inMemory()`.
+  PI SDK execution layer using `createAgentSession()` and `SessionManager.inMemory()`.
+- `core/archive-store.ts`
+  Default archive module.
 
-## PI SDK notes this project now follows
+## Default archive behavior
 
-- The SDK already supports explicit `tools` allowlists.
-- The SDK already supports explicit `model` selection plus `ModelRegistry.find()` and `ModelRegistry.getAvailable()`.
-- `createAgentSession()` can run with `SessionManager.inMemory()` so subagent calls do not need to become normal PI sessions.
-- The default built-in tool set in PI is `read`, `bash`, `edit`, `write`, but this project keeps tools explicit at the adapter boundary for predictability.
+By default, subagent runs archive into a `.block-agent-core/runs/<runId>/` layout under the working directory.
 
-The older dialogue-memory CRUD modules are still present for compatibility, but they are no longer the best mental model for new work.
+Stored artifacts:
+
+- `messages.jsonl`
+- `tool-calls/<id>.json`
+- `external-files.jsonl`
+
+The archive behavior is treated as a replaceable module boundary for future work, but the current implementation ships with one default archive module enabled.
 
 ## Development
 

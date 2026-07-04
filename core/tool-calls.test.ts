@@ -1,10 +1,11 @@
 import { describe, it, expect, afterAll } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendToolCall, getToolCall, queryToolCalls, updateToolCall } from "./tool-calls.ts";
 import type { ToolCallInput } from "./types.ts";
 
-const tmpDir = mkdtempSync("/tmp/toolcalls-test-");
+const tmpDir = mkdtempSync(join(tmpdir(), "toolcalls-test-"));
 const tablePath = join(tmpDir, "tool-calls.jsonl");
 
 afterAll(() => {

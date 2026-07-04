@@ -1,10 +1,11 @@
 import { describe, it, expect, afterAll } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadRecipes, getRecipe, addRecipe, updateRecipe } from "./recipes.ts";
 import type { Recipe } from "./types.ts";
 
-const tmpDir = mkdtempSync("/tmp/recipes-test-");
+const tmpDir = mkdtempSync(join(tmpdir(), "recipes-test-"));
 const recipePath = join(tmpDir, "recipes.toml");
 
 afterAll(() => {

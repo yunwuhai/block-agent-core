@@ -1,9 +1,10 @@
 import { describe, it, expect, afterAll } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readJsonl, appendJsonl, writeJsonl, updateJsonl, deleteJsonl } from "./jsonl.ts";
 
-const tmpDir = mkdtempSync("/tmp/jsonl-test-");
+const tmpDir = mkdtempSync(join(tmpdir(), "jsonl-test-"));
 
 afterAll(() => {
   rmSync(tmpDir, { recursive: true, force: true });

@@ -1,10 +1,11 @@
 import { describe, it, expect, afterAll } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendCallRecord, getCallRecord, queryCallRecords, updateCallRecord } from "./call-records.ts";
 import type { CallRecordInput, Ref } from "./types.ts";
 
-const tmpDir = mkdtempSync("/tmp/callrecords-test-");
+const tmpDir = mkdtempSync(join(tmpdir(), "callrecords-test-"));
 const tablePath = join(tmpDir, "call-records.jsonl");
 
 afterAll(() => {

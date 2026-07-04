@@ -1,69 +1,58 @@
 ---
-name: dialogue-memory
-description: Persist and query structured conversation memory using JSONL-backed tables. Save conversation turns, tool calls, file references, templates, recipes, and build prompts. Every save produces a .md file and atomic JSONL records.
+name: block-agent-core
+description: Compose context blocks, run a PI SDK-backed subagent with explicit model and tool selection, and archive structured results through the default archive module.
 ---
 
-# Dialogue Memory
+# Block Agent Core
 
-Manage a structured conversation memory database. Store turns, tool calls, file references, templates, and call records as JSONL files with an atomic save orchestrator. Includes a recipe-based prompt builder.
+Use the `block_agent_core` tool when you need a focused external subagent run with explicit context assembly and structured archives.
 
 ## When to Use
 
-- **Save a conversation turn** — use `saveTurn` to write a .md file + append to 4 JSONL tables atomically.
-- **Query past turns** — use `queryTurns`, `listTurns`, or `findRecentTurns` to retrieve conversation history by tags or IDs.
-- **Build a prompt** — use `buildPrompt` or `buildPromptFromRecipe` to assemble context from recipe zones around `{{CURRENT_TURN}}`.
-- **Track tool calls** — use `appendToolCall` / `queryToolCalls` for per-turn tool invocation records.
+- You need to assemble context from specific JSONL fields or file slices.
+- You want a PI SDK-backed subagent run with explicit model selection.
+- You want tool access to be passed as an explicit allowlist.
+- You want reasoning, replies, tool calls, and file access records archived in a structured way.
 
-## Invocation
+## Actions
 
-### Named exports (core API — zero PI dependency)
+### `load_context`
 
-| Function | Purpose |
-|----------|---------|
-| `saveTurn(params)` | Atomic turn save: renders .md + appends to turns, tool-calls, file-refs, call-records tables |
-| `appendTurn / getTurn / queryTurns / updateTurn` | Turn CRUD over JSONL |
-| `listTurns(tablePath)` | List all turns (convenience wrapper for `queryTurns(path, {})`) |
-| `findRecentTurns(dirPath, limit)` | Return last N turns across all JSONL files in a directory |
-| `appendToolCall / getToolCall / queryToolCalls / updateToolCall` | Tool call CRUD |
-| `appendTemplate / getTemplate / queryTemplates / updateTemplate` | Template CRUD |
-| `appendFileRef / getFileRef / queryFileRefs / updateFileRef` | File reference CRUD |
-| `appendCallRecord / getCallRecord / queryCallRecords / updateCallRecord` | Call record CRUD |
-| `loadRecipes / getRecipe / addRecipe / updateRecipe` | Recipe TOML CRUD |
-| `buildPrompt(recipePath, callRecord, resolver)` | Build a prompt from recipe zones |
-| `buildPromptFromRecipe(recipe, callRecord, resolver)` | Build a prompt from an already-loaded recipe |
+Compose context text from source blocks.
 
-### Default export (PI extension)
+Typical inputs:
 
-When loaded as a PI extension, registers the `dialogue_memory` tool with four actions: `save`, `load`, `query`, `manage`.
+- `sources`
+- optional `separator`
 
-## Architecture
+### `run_subagent`
 
-```
-index.ts → dual export: default (PI extension) + named (core API)
+Execute one subagent run.
 
-core/       Pure functions, zero PI, zero I/O
-  turns.ts        Turn CRUD (append/get/query/update/list/findRecent)
-  tool-calls.ts   Tool call CRUD
-  templates.ts    Template CRUD
-  file-refs.ts    File reference CRUD
-  call-records.ts Call record CRUD
-  recipes.ts      Recipe TOML CRUD
-  build-prompt.ts Prompt assembly from recipe zones
-  save-turn.ts    Orchestrator: .md render + 4-table append
-  types.ts        Shared TypeScript types
+Typical inputs:
 
-tool/       PI integration layer
-  dialogue-memory.ts   Registers dialogue_memory tool
-  actions/             Action handlers: load, save, query, manage
+- `inputText`
+- `runId`
+- `keyParts`
+- optional `context`
+- optional `sources`
+- optional `modelSelection`
+- optional `tools`
+- optional `systemPrompt`
+- optional `archiveEnabled`
+- optional `archiveRootDir`
 
-utils/      Shared helpers
-  jsonl.ts   JSONL read/append/write/update/delete (atomic .tmp + rename)
-  glob.ts    Glob pattern matching (** / * / ?)
-  toml.ts    TOML read/write (smol-toml)
-```
+### `list_models`
+
+List PI models and their availability.
+
+### `archive_result`
+
+Explicitly archive messages, tool calls, and external file records through the default archive module.
 
 ## Key Constraints
 
-- `core/` modules are pure functions — they accept file paths, delegate I/O to `utils/`.
-- JSONL files use atomic writes (`.tmp` + rename) for crash safety.
-- `tsconfig` enforces `verbatimModuleSyntax` and `exactOptionalPropertyTypes`.
+- Treat context assembly as block composition, not as a generic database query layer.
+- Prefer `run_subagent` over directly manipulating old CRUD-style memory records.
+- Model selection should be explicit: current, default, or specific provider/model.
+- Tool selection should be explicit, not inferred.

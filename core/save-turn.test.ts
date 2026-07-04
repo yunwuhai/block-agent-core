@@ -1,11 +1,12 @@
 import { describe, it, expect, afterAll } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readFile } from "node:fs/promises";
 import { saveTurn } from "./save-turn.ts";
 import type { TurnInput } from "./types.ts";
 
-const tmpDir = mkdtempSync("/tmp/saveturn-test-");
+const tmpDir = mkdtempSync(join(tmpdir(), "saveturn-test-"));
 
 afterAll(() => {
   rmSync(tmpDir, { recursive: true, force: true });

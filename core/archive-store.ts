@@ -56,6 +56,10 @@ export interface SaveSubagentResultInput {
   externalFiles?: ExternalFileAccessRecord[];
 }
 
+export function createDefaultArchiveRootDir(baseDir: string, runId: string): string {
+  return join(baseDir, ".block-agent-core", "runs", runId);
+}
+
 export function createArchiveLayout(rootDir: string): ArchiveLayout {
   return {
     rootDir,

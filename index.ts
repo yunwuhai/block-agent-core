@@ -1,19 +1,19 @@
 // index.ts
 // ===========================================================================
-// 对话记忆数据库 (Dialogue Memory Database)
+// Block Agent Core
 //
 // 双导出：
-//   - 默认导出: PI 扩展工厂（动态加载 PI 依赖，保持核心层零 PI）
-//   - 命名导出: 核心 CRUD + buildPrompt + saveTurn（零 PI 依赖）
+//   - 默认导出: PI 扩展工厂，注册 block_agent_core 工具
+//   - 命名导出: 可复用核心能力（context assembly / PI SDK adapter / archive）
 // ===========================================================================
 
-// Default export: PI extension — lazily imports PI modules
+// Default export: PI extension - lazily imports PI modules
 export default async function (pi: import("@earendil-works/pi-coding-agent").ExtensionAPI): Promise<void> {
-  const { registerDialogueMemoryTool } = await import("./tool/dialogue-memory.ts");
-  registerDialogueMemoryTool(pi);
+  const { registerBlockAgentCoreTool } = await import("./tool/block-agent-core.ts");
+  registerBlockAgentCoreTool(pi);
 }
 
-// Named exports: core API (zero PI dependency)
+// Named exports: reusable core API
 export { appendTurn, getTurn, queryTurns, updateTurn, listTurns, findRecentTurns } from "./core/turns.ts";
 export { appendToolCall, getToolCall, queryToolCalls, updateToolCall } from "./core/tool-calls.ts";
 export { appendTemplate, getTemplate, queryTemplates, updateTemplate } from "./core/templates.ts";
@@ -44,6 +44,7 @@ export {
 export {
   appendMessageRecord,
   createArchiveLayout,
+  createDefaultArchiveRootDir,
   registerExternalFileAccess,
   saveSubagentResult,
 } from "./core/archive-store.ts";

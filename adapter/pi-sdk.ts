@@ -1,13 +1,3 @@
-import type { Api, Model } from "@earendil-works/pi-ai/compat";
-import {
-  createAgentSession,
-  type AuthStorage,
-  type ModelRegistry,
-  SessionManager,
-  type SettingsManager,
-  type ResourceLoader,
-  type ToolDefinition,
-} from "@earendil-works/pi-coding-agent";
 import {
   createArchiveLayout,
   saveSubagentResult,
@@ -22,6 +12,25 @@ import {
   type SubagentRunRequest,
   type SubagentTurnIdentity,
 } from "../core/subagent-run.ts";
+
+export interface PiModel {
+  provider: string;
+  id: string;
+  name?: string;
+  reasoning?: boolean;
+  input: string[];
+}
+
+export interface ModelRegistry {
+  getAll(): PiModel[];
+  getAvailable(): PiModel[];
+  find(provider: string, modelId: string): PiModel | undefined;
+}
+
+export type AuthStorage = unknown;
+export type SettingsManager = unknown;
+export type ResourceLoader = unknown;
+export type ToolDefinition = unknown;
 
 export interface PiModelSummary {
   provider: string;
@@ -38,7 +47,7 @@ export interface PiSdkRunOptions extends SubagentRunRequest {
   agentDir?: string;
   authStorage?: AuthStorage;
   modelRegistry: ModelRegistry;
-  currentModel?: Model<Api>;
+  currentModel?: PiModel;
   customTools?: ToolDefinition[];
   resourceLoader?: ResourceLoader;
   settingsManager?: SettingsManager;
@@ -69,7 +78,7 @@ interface ToolExecutionEndLike {
   isError: boolean;
 }
 
-function toModelSummary(model: Model<Api>, available: boolean): PiModelSummary {
+function toModelSummary(model: PiModel, available: boolean): PiModelSummary {
   return {
     provider: model.provider,
     modelId: model.id,
@@ -95,9 +104,9 @@ export function listPiModels(modelRegistry: ModelRegistry): {
 
 export function resolvePiModel(
   modelRegistry: ModelRegistry,
-  currentModel: Model<Api> | undefined,
+  currentModel: PiModel | undefined,
   selection: SubagentModelSelection | undefined,
-): Model<Api> {
+): PiModel {
   const requested = selection ?? { strategy: "default" as const };
 
   if (requested.strategy === "current") {
@@ -150,6 +159,8 @@ function finalizeToolTrace(
 }
 
 export async function runSubagentWithPiSdk(options: PiSdkRunOptions): Promise<PiSdkRunResult> {
+  const pi = await import("@earendil-works/pi-coding-agent") as any;
+  const { createAgentSession, SessionManager } = pi;
   const model = resolvePiModel(options.modelRegistry, options.currentModel, options.modelSelection);
   const tools = normalizeToolNames(options.tools);
   const turnId = composeSubagentTurnId(options.turnIdentity);
@@ -184,7 +195,7 @@ export async function runSubagentWithPiSdk(options: PiSdkRunOptions): Promise<Pi
   const pendingToolCalls = new Map<string, ToolCallTrace>();
   const finishedToolCalls: ToolCallTrace[] = [];
 
-  const unsubscribe = session.subscribe((event) => {
+  const unsubscribe = session.subscribe((event: any) => {
     if (event.type === "message_update") {
       if (event.assistantMessageEvent.type === "thinking_delta") {
         reasoningText += event.assistantMessageEvent.delta;

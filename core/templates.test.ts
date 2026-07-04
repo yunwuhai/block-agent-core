@@ -1,11 +1,12 @@
 // core/templates.test.ts
 import { describe, it, expect, afterAll } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendTemplate, getTemplate, queryTemplates, updateTemplate } from "./templates.ts";
 import type { TemplateInput } from "./types.ts";
 
-const tmpDir = mkdtempSync("/tmp/templates-test-");
+const tmpDir = mkdtempSync(join(tmpdir(), "templates-test-"));
 const tablePath = join(tmpDir, "templates.jsonl");
 
 afterAll(() => {

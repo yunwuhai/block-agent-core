@@ -1,11 +1,12 @@
 // core/file-refs.test.ts
 import { describe, it, expect, afterAll } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendFileRef, getFileRef, queryFileRefs, updateFileRef } from "./file-refs.ts";
 import type { FileRefInput } from "./types.ts";
 
-const tmpDir = mkdtempSync("/tmp/filerefs-test-");
+const tmpDir = mkdtempSync(join(tmpdir(), "filerefs-test-"));
 const tablePath = join(tmpDir, "file-refs.jsonl");
 
 afterAll(() => {
