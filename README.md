@@ -1,46 +1,72 @@
-# Better Subagent
+# Block Agent Core
 
-`better-subagent` is evolving into `block_agent_core`: a PI Coding Agent extension for block-based context assembly, PI SDK subagent execution, and structured result archiving.
+`block-agent-core` is now a session-first runtime for PI Coding Agent.
 
-## What it does
+Instead of treating every subagent run as a standalone call, it manages:
 
-The new system is built around four extension-facing actions:
+- persistent sessions
+- mounted context blocks
+- queued tasks
+- structured message / tool / file archives
+- JSONL event streams
 
-- `load_context`
-  Compose context blocks from JSONL fields and file slices.
-- `run_subagent`
-  Run a PI SDK-backed subagent with explicit input text, model selection, tool selection, turn identity, and default archiving.
+## Public Tool
+
+The extension registers one tool:
+
+- `block_agent_core`
+
+Supported actions:
+
+- `create_session`
+- `get_session`
+- `list_sessions`
+- `mount_context`
+- `unmount_context`
+- `list_context_mounts`
+- `send_task`
+- `get_task`
+- `list_tasks`
+- `read_events`
 - `list_models`
-  Inspect PI models that are known and currently available.
-- `archive_result`
-  Persist reasoning, replies, tool calls, and external file access records through the default archive module.
+- `archive_session`
 
-## Internal shape
+## Core Model
 
-The implementation is centered on:
+- A `session` is a persistent runtime unit with fixed system prompts and default PI settings.
+- A `task` is one input sent to a session.
+- The scheduler runs tasks across sessions with a global max concurrency of `8`.
+- The same session never runs two tasks at the same time.
 
-- `core/context-sources.ts`
-  Context block loaders and loader registry.
-- `core/subagent-run.ts`
-  Turn identity, model selection, and tool selection primitives.
-- `core/pi-config.ts`
-  Prompt and invocation builders.
-- `adapter/pi-sdk.ts`
-  PI SDK execution layer using `createAgentSession()` and `SessionManager.inMemory()`.
-- `core/archive-store.ts`
-  Default archive module.
-
-## Default archive behavior
-
-By default, subagent runs archive into a `.block-agent-core/runs/<runId>/` layout under the working directory.
-
-Stored artifacts:
+Each session stores:
 
 - `messages.jsonl`
-- `tool-calls/<id>.json`
-- `external-files.jsonl`
+- `tool-calls.jsonl`
+- `file-calls.jsonl`
+- `system-prompts.json`
 
-The archive behavior is treated as a replaceable module boundary for future work, but the current implementation ships with one default archive module enabled.
+Additional runtime state is stored in:
+
+- `tasks.jsonl`
+- `events.jsonl`
+
+## Context Loading
+
+The project provides loading primitives, not loading policy.
+
+Built-in source types:
+
+- `jsonl-fields`
+- `file`
+
+`jsonl-fields` supports:
+
+- field-based loading
+- sequence ranges
+- tag filtering
+- optional tool/file reference expansion
+
+Custom loaders can still be registered.
 
 ## Development
 

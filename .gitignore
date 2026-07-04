@@ -28,6 +28,8 @@ registry-calls.jsonl
 .opencode/
 .codex/
 .codegraph/
+.tmp-*/
+.tmp-debug-*/
 
 # Editor & OS files
 .vscode/

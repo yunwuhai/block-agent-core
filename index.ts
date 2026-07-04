@@ -38,6 +38,37 @@ export {
   loadJsonlFieldsSource,
 } from "./core/context-sources.ts";
 export {
+  appendSessionEvent,
+  appendSessionFileCall,
+  appendSessionMessage,
+  appendSessionToolCall,
+  createSession,
+  createSessionLayout,
+  createSessionTask,
+  createSessionsRootDir,
+  getNextMessageSequence,
+  getSessionTask,
+  listContextMounts,
+  listSessions,
+  mountContext,
+  readEvents,
+  readFileCalls,
+  readMessages,
+  readSessionConfig,
+  readTasks,
+  readToolCalls,
+  unmountContext,
+  updateSessionTask,
+  writeSessionConfig,
+} from "./core/session-store.ts";
+export {
+  executeSessionTask,
+} from "./core/session-runtime.ts";
+export {
+  getDefaultTaskScheduler,
+  TaskScheduler,
+} from "./core/task-scheduler.ts";
+export {
   buildSubagentInvocation,
   buildSubagentPrompt,
 } from "./core/pi-config.ts";
@@ -49,6 +80,7 @@ export {
   saveSubagentResult,
 } from "./core/archive-store.ts";
 export {
+  importPiModelRegistryFromStandalone,
   listPiModels,
   resolvePiModel,
   runSubagentWithPiSdk,
@@ -57,5 +89,6 @@ export type * from "./core/types.ts";
 export type * from "./core/context-sources.ts";
 export type * from "./core/pi-config.ts";
 export type * from "./core/archive-store.ts";
+export type * from "./core/session-store.ts";
 export type * from "./core/subagent-run.ts";
 export type * from "./adapter/pi-sdk.ts";

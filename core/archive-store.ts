@@ -1,13 +1,12 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { renameSync } from "node:fs";
+import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { appendJsonl } from "../utils/jsonl.ts";
 
 export interface ArchiveLayout {
   rootDir: string;
   messagesPath: string;
-  toolCallsDir: string;
-  externalFilesPath: string;
+  toolCallsPath: string;
+  fileCallsPath: string;
 }
 
 export interface ReasoningRecord {
@@ -64,18 +63,9 @@ export function createArchiveLayout(rootDir: string): ArchiveLayout {
   return {
     rootDir,
     messagesPath: join(rootDir, "messages.jsonl"),
-    toolCallsDir: join(rootDir, "tool-calls"),
-    externalFilesPath: join(rootDir, "external-files.jsonl"),
+    toolCallsPath: join(rootDir, "tool-calls.jsonl"),
+    fileCallsPath: join(rootDir, "file-calls.jsonl"),
   };
-}
-
-async function writeToolCallTrace(toolCallsDir: string, trace: ToolCallTrace): Promise<string> {
-  await mkdir(toolCallsDir, { recursive: true });
-  const outputPath = join(toolCallsDir, `${trace.id}.json`);
-  const tmpPath = `${outputPath}.tmp`;
-  await writeFile(tmpPath, JSON.stringify(trace, null, 2) + "\n", "utf-8");
-  renameSync(tmpPath, outputPath);
-  return outputPath;
 }
 
 export async function appendMessageRecord(
@@ -86,30 +76,33 @@ export async function appendMessageRecord(
 }
 
 export async function registerExternalFileAccess(
-  externalFilesPath: string,
+  fileCallsPath: string,
   record: ExternalFileAccessRecord,
 ): Promise<void> {
-  await appendJsonl(externalFilesPath, record);
+  await appendJsonl(fileCallsPath, record);
 }
 
 export async function saveSubagentResult(
   layout: ArchiveLayout,
   input: SaveSubagentResultInput,
-): Promise<{ toolCallPaths: string[] }> {
+): Promise<{ messagesPath: string; toolCallsPath: string; fileCallsPath: string }> {
   await mkdir(dirname(layout.messagesPath), { recursive: true });
 
   for (const message of input.messages ?? []) {
     await appendMessageRecord(layout.messagesPath, message);
   }
 
-  const toolCallPaths: string[] = [];
   for (const toolCall of input.toolCalls ?? []) {
-    toolCallPaths.push(await writeToolCallTrace(layout.toolCallsDir, toolCall));
+    await appendJsonl(layout.toolCallsPath, toolCall);
   }
 
   for (const externalFile of input.externalFiles ?? []) {
-    await registerExternalFileAccess(layout.externalFilesPath, externalFile);
+    await registerExternalFileAccess(layout.fileCallsPath, externalFile);
   }
 
-  return { toolCallPaths };
+  return {
+    messagesPath: layout.messagesPath,
+    toolCallsPath: layout.toolCallsPath,
+    fileCallsPath: layout.fileCallsPath,
+  };
 }

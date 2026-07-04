@@ -1,58 +1,62 @@
 ---
 name: block-agent-core
-description: Compose context blocks, run a PI SDK-backed subagent with explicit model and tool selection, and archive structured results through the default archive module.
+description: Manage persistent PI-backed sessions with mounted context blocks, queued tasks, JSONL archives, and event streams.
 ---
 
 # Block Agent Core
 
-Use the `block_agent_core` tool when you need a focused external subagent run with explicit context assembly and structured archives.
+Use the `block_agent_core` tool when you need a persistent external agent session instead of a one-shot subagent call.
 
 ## When to Use
 
-- You need to assemble context from specific JSONL fields or file slices.
-- You want a PI SDK-backed subagent run with explicit model selection.
-- You want tool access to be passed as an explicit allowlist.
-- You want reasoning, replies, tool calls, and file access records archived in a structured way.
+- You want one session to keep fixed system prompts and default tool/model settings.
+- You want to mount and unmount context blocks over time.
+- You want multiple sessions to run tasks in parallel under a global scheduler.
+- You want reasoning, replies, tool calls, file calls, and task lifecycle events archived in JSONL form.
 
-## Actions
+## Main Actions
 
-### `load_context`
+### `create_session`
 
-Compose context text from source blocks.
+Create a persistent session with:
 
-Typical inputs:
-
-- `sources`
-- optional `separator`
-
-### `run_subagent`
-
-Execute one subagent run.
-
-Typical inputs:
-
-- `inputText`
-- `runId`
-- `keyParts`
-- optional `context`
-- optional `sources`
+- `sessionId`
+- `systemPromptFilePaths`
+- `sdkMode`
 - optional `modelSelection`
 - optional `tools`
-- optional `systemPrompt`
-- optional `archiveEnabled`
-- optional `archiveRootDir`
+- optional `sdkOptions`
 
-### `list_models`
+### `mount_context`
 
-List PI models and their availability.
+Append mounted context sources to an existing session.
 
-### `archive_result`
+### `send_task`
 
-Explicitly archive messages, tool calls, and external file records through the default archive module.
+Queue one task for a session.
+
+Typical inputs:
+
+- `sessionId`
+- `taskId`
+- `inputText`
+- optional `temporarySources`
+
+### `list_tasks` / `get_task`
+
+Inspect queued, running, completed, or failed tasks.
+
+### `read_events`
+
+Read the persistent event stream for task lifecycle and tool execution updates.
+
+### `archive_session`
+
+Append manual messages, tool calls, or file calls into session storage.
 
 ## Key Constraints
 
-- Treat context assembly as block composition, not as a generic database query layer.
-- Prefer `run_subagent` over directly manipulating old CRUD-style memory records.
-- Model selection should be explicit: current, default, or specific provider/model.
-- Tool selection should be explicit, not inferred.
+- Context policy is caller-owned; the project only provides loading primitives.
+- System prompts are always prepended on each task run.
+- The same session does not run multiple tasks concurrently.
+- Global concurrency is capped by the scheduler, not by the caller.

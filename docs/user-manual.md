@@ -1,173 +1,177 @@
 # Block Agent Core - User Manual for LLM Agents
 
-This manual explains the current public shape of `better-subagent` as it migrates to `block_agent_core`.
-
----
-
 ## What This Project Is
 
-The project should now be treated primarily as a block-based subagent runtime extension for PI Coding Agent.
+`block_agent_core` is now a session-first runtime extension for PI Coding Agent.
 
-The extension-facing flow is:
+The main extension-facing model is:
 
-1. load context blocks
-2. run a PI SDK subagent with explicit model and tool selection
-3. archive results through the default archive module
+1. create a persistent session
+2. mount or unmount context blocks on that session
+3. send tasks into the global scheduler
+4. inspect tasks and read event streams
+5. archive or inspect structured session artifacts
 
-The old dialogue-memory database tool surface is no longer the recommended or supported extension-facing model.
-
----
+The older single-run story (`load_context`, `run_subagent`, `archive_result`) is no longer the supported public tool interface.
 
 ## Extension Tool Surface
 
-The default export registers one PI tool:
+The default export registers one tool:
 
 - `block_agent_core`
 
 Supported actions:
 
-- `load_context`
-- `run_subagent`
+- `create_session`
+- `get_session`
+- `list_sessions`
+- `mount_context`
+- `unmount_context`
+- `list_context_mounts`
+- `send_task`
+- `get_task`
+- `list_tasks`
+- `read_events`
 - `list_models`
-- `archive_result`
+- `archive_session`
 
-Removed extension-facing actions:
+### `create_session`
 
-- `load`
-- `save`
-- `query`
-- `manage`
+Create a session directory and its base configuration.
 
-### `load_context`
+Important inputs:
 
-Use this action to compose context text from explicit sources.
+- `sessionId`
+- `systemPromptFilePaths`
+- `sdkMode`
+- optional `modelSelection`
+- optional `tools`
+- optional `sdkOptions`
 
-Supported source types:
+### `mount_context`
+
+Append mounted context blocks to a session.
+
+Important inputs:
+
+- `sessionId`
+- `sources`
+
+### `unmount_context`
+
+Remove mounted context blocks by mount id.
+
+Important inputs:
+
+- `sessionId`
+- `mountIds`
+
+### `send_task`
+
+Register one task for a session. The scheduler decides whether it runs immediately or waits in the FIFO queue.
+
+Important inputs:
+
+- `sessionId`
+- `taskId`
+- `inputText`
+- optional `temporarySources`
+
+### `get_task` / `list_tasks`
+
+Inspect task state, timestamps, queue position, model, and tools.
+
+### `read_events`
+
+Read the persisted JSONL event stream for a session or task.
+
+### `list_models`
+
+List PI models from either the host environment or standalone SDK mode.
+
+### `archive_session`
+
+Append messages, tool calls, or file calls directly into the session archive.
+
+## Session Storage
+
+Each session is rooted under:
+
+```text
+.block-agent-core/sessions/<sessionId>/
+```
+
+Core files:
+
+- `messages.jsonl`
+- `tool-calls.jsonl`
+- `file-calls.jsonl`
+- `system-prompts.json`
+
+Runtime files:
+
+- `tasks.jsonl`
+- `events.jsonl`
+
+## Context Assembly
+
+Context assembly remains caller-directed.
+
+Built-in source types:
 
 - `jsonl-fields`
 - `file`
 
-Inputs:
+`jsonl-fields` supports:
 
-- `sources`
-- optional `separator`
+- explicit field selection
+- numeric `sequence` range loading
+- tag-based filtering
+- optional expansion of message references into tool/file payloads
 
-### `run_subagent`
+System prompts are automatically prepended on every task run and cannot be unmounted.
 
-Use this action to execute one PI SDK-backed subagent run.
+## Scheduler Behavior
 
-Required inputs:
+- Global max concurrency: `8`
+- Queue policy: FIFO
+- Concurrency occurs across different sessions
+- One session can only have one running task at a time
+- First version exposes persistent event streams instead of in-process hooks
+- First version does not support cancel
 
-- `inputText`
-- `runId`
-- `keyParts`
+## SDK Modes
 
-Optional inputs:
+### `host-inherit`
 
-- `context`
-- `sources`
-- `separator`
-- `systemPrompt`
-- `cwd`
-- `modelSelection`
-- `tools`
-- `archiveEnabled`
-- `archiveRootDir`
+Reuse the host PI environment:
 
-Behavior:
+- host model registry
+- current model
+- existing auth environment
 
-- context sources are composed before execution
-- tool selection is passed through the PI SDK allowlist
-- model selection supports current, default, or explicit provider/model lookup
-- archiving is enabled by default unless `archiveEnabled` is `false`
+### `standalone-sdk`
 
-### `list_models`
+Use explicit SDK and auth inputs from `sdkOptions`.
 
-Use this action to inspect PI model availability.
-
-Returned model fields include:
-
-- `provider`
-- `modelId`
-- `displayName`
-- `reasoning`
-- `input`
-- `available`
-
-### `archive_result`
-
-Use this action to explicitly persist results through the default archive module.
-
-Inputs:
-
-- `archiveRootDir` or `runId`
-- optional `cwd`
-- optional `messages`
-- optional `toolCalls`
-- optional `externalFiles`
-
-If `archiveRootDir` is omitted and `runId` is present, the default archive path is derived from the working directory.
-
----
-
-## Architecture Overview
-
-```text
-index.ts
-|- core/
-|  |- context-sources.ts
-|  |- subagent-run.ts
-|  |- pi-config.ts
-|  `- archive-store.ts
-|- adapter/
-|  `- pi-sdk.ts
-|- tool/
-|  |- block-agent-core.ts
-|  `- actions/
-`- skills/
-```
-
-Execution flow:
-
-```text
-caller chooses context blocks
--> `load_context` composes them
--> `run_subagent` resolves model/tools/turn identity
--> `adapter/pi-sdk.ts` runs an in-memory PI SDK session
--> default archive module writes structured artifacts
-```
-
----
+This avoids silently depending on the user's current PI installation or default key selection.
 
 ## Important Core Exports
 
 Recommended exports for new work:
 
+- `createSession`
+- `readSessionConfig`
+- `mountContext`
+- `unmountContext`
+- `createSessionTask`
+- `executeSessionTask`
+- `TaskScheduler`
 - `composeContext`
 - `loadContextSource`
 - `createContextLoaderRegistry`
-- `composeSubagentTurnId`
-- `normalizeToolNames`
-- `buildSubagentPrompt`
-- `listPiModels`
-- `resolvePiModel`
 - `runSubagentWithPiSdk`
-- `createArchiveLayout`
-- `createDefaultArchiveRootDir`
-- `saveSubagentResult`
-
-Older CRUD-style exports may still exist in the codebase, but they are no longer the design center for extension work.
-
----
-
-## Key Constraints
-
-- `core/` should remain the main implementation center for reusable logic.
-- PI-specific execution should stay in the adapter/tool layers.
-- Context loading remains caller-directed; the project provides primitives, not context policy.
-- The default archive module is enabled now, but future work may replace it behind the same role boundary.
-
----
+- `listPiModels`
 
 ## Development
 

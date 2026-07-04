@@ -1,9 +1,10 @@
 import {
-  createArchiveLayout,
-  saveSubagentResult,
-  type ArchiveLayout,
   type ToolCallTrace,
 } from "../core/archive-store.ts";
+import { access, readdir } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { buildSubagentPrompt } from "../core/pi-config.ts";
 import {
   composeSubagentTurnId,
@@ -12,6 +13,7 @@ import {
   type SubagentRunRequest,
   type SubagentTurnIdentity,
 } from "../core/subagent-run.ts";
+import type { SessionSdkMode, StandaloneSdkOptions } from "../core/session-store.ts";
 
 export interface PiModel {
   provider: string;
@@ -32,6 +34,45 @@ export type SettingsManager = unknown;
 export type ResourceLoader = unknown;
 export type ToolDefinition = unknown;
 
+async function importPiCodingAgentSdk(sdkModulePath?: string): Promise<any> {
+  if (sdkModulePath) {
+    return import(pathToFileURL(sdkModulePath).href);
+  }
+  try {
+    return await import("@earendil-works/pi-coding-agent");
+  } catch (error) {
+    const baseDir = join(homedir(), ".local", "share", "pi-node");
+    const lastError = error as Error;
+
+    try {
+      const runtimeDirs = await readdir(baseDir, { withFileTypes: true });
+      for (const entry of runtimeDirs) {
+        if (!entry.isDirectory()) continue;
+        const candidate = join(
+          baseDir,
+          entry.name,
+          "lib",
+          "node_modules",
+          "@earendil-works",
+          "pi-coding-agent",
+          "dist",
+          "index.js",
+        );
+        try {
+          await access(candidate);
+          return await import(pathToFileURL(candidate).href);
+        } catch {
+          // Continue scanning other PI runtime installations.
+        }
+      }
+    } catch {
+      // Fall through to the original import error below.
+    }
+
+    throw new Error(`Unable to load PI Coding Agent SDK: ${lastError.message}`);
+  }
+}
+
 export interface PiModelSummary {
   provider: string;
   modelId: string;
@@ -43,7 +84,6 @@ export interface PiModelSummary {
 
 export interface PiSdkRunOptions extends SubagentRunRequest {
   turnIdentity: SubagentTurnIdentity;
-  archiveRootDir?: string;
   agentDir?: string;
   authStorage?: AuthStorage;
   modelRegistry: ModelRegistry;
@@ -51,6 +91,9 @@ export interface PiSdkRunOptions extends SubagentRunRequest {
   customTools?: ToolDefinition[];
   resourceLoader?: ResourceLoader;
   settingsManager?: SettingsManager;
+  sdkMode?: SessionSdkMode;
+  sdkOptions?: StandaloneSdkOptions;
+  onEvent?: (event: { type: string; payload: Record<string, unknown> }) => void | Promise<void>;
 }
 
 export interface PiSdkRunResult {
@@ -62,7 +105,6 @@ export interface PiSdkRunResult {
   reasoningText: string;
   replyText: string;
   toolCalls: ToolCallTrace[];
-  archiveLayout?: ArchiveLayout;
 }
 
 interface ToolExecutionStartLike {
@@ -135,6 +177,40 @@ export function resolvePiModel(
   return available[0]!;
 }
 
+async function createStandaloneRuntime(
+  sdkOptions: StandaloneSdkOptions | undefined,
+  requestedModel: SubagentModelSelection | undefined,
+): Promise<{ modelRegistry: ModelRegistry; currentModel?: PiModel; sdkModule: any }> {
+  const sdkModule = await importPiCodingAgentSdk(sdkOptions?.sdkModulePath);
+  const { AuthStorage, ModelRegistry } = sdkModule;
+  if (!AuthStorage || !ModelRegistry) {
+    throw new Error("Standalone SDK mode requires AuthStorage and ModelRegistry from the PI SDK");
+  }
+  if (!sdkOptions?.authStoragePath) {
+    throw new Error("Standalone SDK mode requires sdkOptions.authStoragePath");
+  }
+
+  const authStorage = AuthStorage.create(sdkOptions.authStoragePath);
+  authStorage.reload();
+  const modelRegistry = ModelRegistry.create(authStorage);
+  modelRegistry.refresh();
+
+  const currentModel = sdkOptions.currentModel
+    ? modelRegistry.find(sdkOptions.currentModel.provider, sdkOptions.currentModel.modelId)
+    : (requestedModel?.strategy === "specific"
+      ? modelRegistry.find(requestedModel.provider, requestedModel.modelId)
+      : modelRegistry.getAvailable()[0]);
+
+  return { modelRegistry, currentModel, sdkModule };
+}
+
+export async function importPiModelRegistryFromStandalone(
+  sdkOptions: StandaloneSdkOptions | undefined,
+): Promise<ModelRegistry> {
+  const { modelRegistry } = await createStandaloneRuntime(sdkOptions, undefined);
+  return modelRegistry;
+}
+
 function createToolTraceFromStart(event: ToolExecutionStartLike): ToolCallTrace {
   return {
     id: event.toolCallId,
@@ -159,9 +235,19 @@ function finalizeToolTrace(
 }
 
 export async function runSubagentWithPiSdk(options: PiSdkRunOptions): Promise<PiSdkRunResult> {
-  const pi = await import("@earendil-works/pi-coding-agent") as any;
+  let runtimeModelRegistry = options.modelRegistry;
+  let runtimeCurrentModel = options.currentModel;
+  let pi = await importPiCodingAgentSdk(options.sdkOptions?.sdkModulePath);
+
+  if (options.sdkMode === "standalone-sdk") {
+    const standalone = await createStandaloneRuntime(options.sdkOptions, options.modelSelection);
+    runtimeModelRegistry = standalone.modelRegistry;
+    runtimeCurrentModel = standalone.currentModel;
+    pi = standalone.sdkModule;
+  }
+
   const { createAgentSession, SessionManager } = pi;
-  const model = resolvePiModel(options.modelRegistry, options.currentModel, options.modelSelection);
+  const model = resolvePiModel(runtimeModelRegistry, runtimeCurrentModel, options.modelSelection);
   const tools = normalizeToolNames(options.tools);
   const turnId = composeSubagentTurnId(options.turnIdentity);
   const promptInput = {
@@ -175,7 +261,7 @@ export async function runSubagentWithPiSdk(options: PiSdkRunOptions): Promise<Pi
   );
 
   const sessionOptions = {
-    modelRegistry: options.modelRegistry,
+    modelRegistry: runtimeModelRegistry,
     model,
     tools,
     sessionManager: SessionManager.inMemory(),
@@ -207,6 +293,15 @@ export async function runSubagentWithPiSdk(options: PiSdkRunOptions): Promise<Pi
 
     if (event.type === "tool_execution_start") {
       pendingToolCalls.set(event.toolCallId, createToolTraceFromStart(event));
+      void options.onEvent?.({
+        type: "tool_call_started",
+        payload: {
+          turnId,
+          toolCallId: event.toolCallId,
+          toolName: event.toolName,
+          params: event.args ?? {},
+        },
+      });
     }
 
     if (event.type === "tool_execution_end") {
@@ -217,6 +312,16 @@ export async function runSubagentWithPiSdk(options: PiSdkRunOptions): Promise<Pi
       });
       finishedToolCalls.push(finalizeToolTrace(existing, event, `${turnId}:reply`));
       pendingToolCalls.delete(event.toolCallId);
+      void options.onEvent?.({
+        type: "tool_call_finished",
+        payload: {
+          turnId,
+          toolCallId: event.toolCallId,
+          toolName: event.toolName,
+          result: event.result ?? null,
+          isError: event.isError,
+        },
+      });
     }
   });
 
@@ -225,18 +330,6 @@ export async function runSubagentWithPiSdk(options: PiSdkRunOptions): Promise<Pi
   } finally {
     unsubscribe();
     session.dispose();
-  }
-
-  let archiveLayout: ArchiveLayout | undefined;
-  if (options.archiveRootDir) {
-    archiveLayout = createArchiveLayout(options.archiveRootDir);
-    await saveSubagentResult(archiveLayout, {
-      messages: [
-        { id: `${turnId}:reasoning`, kind: "reasoning", text: reasoningText, sequence: 1 },
-        { id: `${turnId}:reply`, kind: "reply", text: replyText, sequence: 2 },
-      ],
-      toolCalls: finishedToolCalls,
-    });
   }
 
   return {
@@ -248,6 +341,5 @@ export async function runSubagentWithPiSdk(options: PiSdkRunOptions): Promise<Pi
     reasoningText,
     replyText,
     toolCalls: finishedToolCalls,
-    ...(archiveLayout ? { archiveLayout } : {}),
   };
 }

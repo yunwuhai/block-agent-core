@@ -1,14 +1,22 @@
 import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { readJsonl } from "../utils/jsonl.ts";
 
 export interface JsonlFieldsSource {
   type: "jsonl-fields";
   filePath: string;
-  fieldOrder: string[];
+  fieldOrder?: string[];
+  fieldNames?: string[];
   recordIds?: string[];
   idKey?: string;
+  startSequence?: number;
+  endSequence?: number;
+  tags?: string[];
   recordSeparator?: string;
   valueSeparator?: string;
+  expandReferences?: boolean;
+  toolCallsPath?: string;
+  fileCallsPath?: string;
 }
 
 export interface FileSliceSource {
@@ -48,6 +56,13 @@ function formatValue(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
+function hasAnyTag(record: Record<string, unknown>, tags: string[]): boolean {
+  const recordTags = record.tags;
+  if (!Array.isArray(recordTags)) return false;
+  const normalized = new Set(recordTags.filter((tag): tag is string => typeof tag === "string"));
+  return tags.some(tag => normalized.has(tag));
+}
+
 function applyLineRange(content: string, range?: string): string {
   if (!range) return content;
   const [startStr, endStr] = range.split("-");
@@ -60,19 +75,76 @@ function applyLineRange(content: string, range?: string): string {
 export async function loadJsonlFieldsSource(source: JsonlFieldsSource): Promise<string> {
   const records = await readJsonl<Record<string, unknown>>(source.filePath);
   const idKey = source.idKey ?? "id";
-  const filtered = source.recordIds?.length
-    ? records.filter(record => source.recordIds!.includes(String(getNestedValue(record, idKey) ?? "")))
-    : records;
+  const selectedFields = source.fieldNames?.length
+    ? source.fieldNames
+    : (source.fieldOrder ?? []);
+
+  const filtered = records.filter((record) => {
+    if (source.recordIds?.length && !source.recordIds.includes(String(getNestedValue(record, idKey) ?? ""))) {
+      return false;
+    }
+    if (source.startSequence !== undefined || source.endSequence !== undefined) {
+      const sequence = Number(getNestedValue(record, "sequence"));
+      if (Number.isNaN(sequence)) {
+        return false;
+      }
+      if (source.startSequence !== undefined && sequence < source.startSequence) {
+        return false;
+      }
+      if (source.endSequence !== undefined && sequence > source.endSequence) {
+        return false;
+      }
+    }
+    if (source.tags?.length && !hasAnyTag(record, source.tags)) {
+      return false;
+    }
+    return true;
+  });
 
   const valueSeparator = source.valueSeparator ?? "\n";
   const recordSeparator = source.recordSeparator ?? "\n\n";
 
+  let toolCallRecords: Record<string, unknown>[] | undefined;
+  let fileCallRecords: Record<string, unknown>[] | undefined;
+  if (source.expandReferences) {
+    toolCallRecords = await readJsonl<Record<string, unknown>>(source.toolCallsPath ?? join(dirname(source.filePath), "tool-calls.jsonl"));
+    fileCallRecords = await readJsonl<Record<string, unknown>>(source.fileCallsPath ?? join(dirname(source.filePath), "file-calls.jsonl"));
+  }
+
+  function expandRecord(record: Record<string, unknown>): string {
+    const kind = typeof record.kind === "string" ? record.kind : undefined;
+    if (kind === "tool_call" && typeof record.toolCallId === "string") {
+      const toolCall = toolCallRecords?.find(item => String(item.id ?? "") === record.toolCallId);
+      if (!toolCall) return "";
+      return [
+        `Tool: ${String(toolCall.toolName ?? "")}`,
+        `Params: ${JSON.stringify(toolCall.params ?? {}, null, 2)}`,
+        `Result: ${JSON.stringify(toolCall.result ?? null, null, 2)}`,
+      ].join("\n");
+    }
+    if (kind === "file_call" && typeof record.fileCallId === "string") {
+      const fileCall = fileCallRecords?.find(item => String(item.id ?? "") === record.fileCallId);
+      if (!fileCall) return "";
+      return [
+        `File: ${String(fileCall.filePath ?? "")}`,
+        `Access: ${String(fileCall.accessType ?? "")}`,
+        ...(typeof fileCall.toolCallId === "string" ? [`ToolCall: ${fileCall.toolCallId}`] : []),
+      ].join("\n");
+    }
+    return "";
+  }
+
   return filtered
-    .map(record =>
-      source.fieldOrder
+    .map(record => {
+      const block = selectedFields
         .map(field => formatValue(getNestedValue(record, field)))
         .filter(value => value.length > 0)
-        .join(valueSeparator))
+        .join(valueSeparator);
+      if (block.length > 0) {
+        return block;
+      }
+      return source.expandReferences ? expandRecord(record) : "";
+    })
     .filter(block => block.length > 0)
     .join(recordSeparator);
 }

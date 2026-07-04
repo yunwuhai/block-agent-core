@@ -32,20 +32,45 @@ describe("context sources", () => {
     expect(content).toBe("user: hello\nassistant: world");
   });
 
-  it("filters JSONL records by custom id key", async () => {
-    const jsonlPath = join(tmpDir, "events.jsonl");
-    await appendJsonl(jsonlPath, { key: "a", payload: { text: "first" } });
-    await appendJsonl(jsonlPath, { key: "b", payload: { text: "second" } });
+  it("filters JSONL records by sequence range and tags", async () => {
+    const jsonlPath = join(tmpDir, "tagged-messages.jsonl");
+    await appendJsonl(jsonlPath, { id: "msg-1", sequence: 1, text: "one", tags: ["summary"] });
+    await appendJsonl(jsonlPath, { id: "msg-2", sequence: 2, text: "two", tags: ["debug"] });
+    await appendJsonl(jsonlPath, { id: "msg-3", sequence: 3, text: "three", tags: ["summary", "debug"] });
 
     const content = await loadContextSource({
       type: "jsonl-fields",
       filePath: jsonlPath,
-      fieldOrder: ["payload.text"],
-      idKey: "key",
-      recordIds: ["b"],
+      fieldNames: ["text"],
+      startSequence: 2,
+      endSequence: 3,
+      tags: ["summary"],
     });
 
-    expect(content).toBe("second");
+    expect(content).toBe("three");
+  });
+
+  it("expands message references into tool and file call payloads", async () => {
+    const dir = join(tmpDir, "expanded");
+    const messagesPath = join(dir, "messages.jsonl");
+    const toolCallsPath = join(dir, "tool-calls.jsonl");
+    const fileCallsPath = join(dir, "file-calls.jsonl");
+
+    await appendJsonl(messagesPath, { id: "m1", sequence: 1, kind: "tool_call", toolCallId: "call-1" });
+    await appendJsonl(messagesPath, { id: "m2", sequence: 2, kind: "file_call", fileCallId: "file-1" });
+    await appendJsonl(toolCallsPath, { id: "call-1", toolName: "read", params: { path: "/tmp/a.ts" }, result: { ok: true } });
+    await appendJsonl(fileCallsPath, { id: "file-1", filePath: "/tmp/a.ts", accessType: "read" });
+
+    const content = await loadContextSource({
+      type: "jsonl-fields",
+      filePath: messagesPath,
+      startSequence: 1,
+      endSequence: 2,
+      expandReferences: true,
+    });
+
+    expect(content).toContain("Tool: read");
+    expect(content).toContain("File: /tmp/a.ts");
   });
 
   it("supports pluggable custom loaders", async () => {

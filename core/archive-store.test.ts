@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { createArchiveLayout, saveSubagentResult } from "./archive-store.ts";
 import { readJsonl } from "../utils/jsonl.ts";
@@ -11,7 +11,7 @@ afterAll(() => {
 });
 
 describe("archive store", () => {
-  it("stores messages, tool traces, and external file access separately", async () => {
+  it("stores messages, tool traces, and external file access in JSONL files", async () => {
     const layout = createArchiveLayout(join(tmpDir, "run-001"));
 
     const result = await saveSubagentResult(layout, {
@@ -42,12 +42,13 @@ describe("archive store", () => {
     const messages = await readJsonl<{ id: string; kind: string }>(layout.messagesPath);
     expect(messages.map(message => message.kind)).toEqual(["reasoning", "reply"]);
 
-    expect(result.toolCallPaths).toHaveLength(1);
-    expect(existsSync(result.toolCallPaths[0]!)).toBe(true);
-    expect(readFileSync(result.toolCallPaths[0]!, "utf-8")).toContain("\"toolName\": \"read_file\"");
+    const toolCalls = await readJsonl<{ toolName: string }>(layout.toolCallsPath);
+    expect(toolCalls).toHaveLength(1);
+    expect(toolCalls[0]!.toolName).toBe("read_file");
 
-    const externalFiles = await readJsonl<{ id: string; toolCallId?: string }>(layout.externalFilesPath);
-    expect(externalFiles).toHaveLength(1);
-    expect(externalFiles[0]!.toolCallId).toBe("tool-1");
+    const fileCalls = await readJsonl<{ toolCallId?: string }>(layout.fileCallsPath);
+    expect(fileCalls[0]!.toolCallId).toBe("tool-1");
+
+    expect(result.toolCallsPath).toBe(layout.toolCallsPath);
   });
 });
