@@ -22,4 +22,39 @@ export { appendCallRecord, getCallRecord, queryCallRecords, updateCallRecord } f
 export { loadRecipes, getRecipe, addRecipe, updateRecipe } from "./core/recipes.ts";
 export { buildPrompt, buildPromptFromRecipe } from "./core/build-prompt.ts";
 export { saveTurn } from "./core/save-turn.ts";
+export {
+  composeSubagentTurnId,
+  normalizeToolNames,
+  PI_BUILTIN_TOOLS,
+  PI_DEFAULT_SUBAGENT_TOOLS,
+  usesOnlyBuiltinTools,
+} from "./core/subagent-run.ts";
+export {
+  composeContext,
+  createContextLoaderRegistry,
+  loadContextSource,
+  loadContextSources,
+  loadFileSliceSource,
+  loadJsonlFieldsSource,
+} from "./core/context-sources.ts";
+export {
+  buildSubagentInvocation,
+  buildSubagentPrompt,
+} from "./core/pi-config.ts";
+export {
+  appendMessageRecord,
+  createArchiveLayout,
+  registerExternalFileAccess,
+  saveSubagentResult,
+} from "./core/archive-store.ts";
+export {
+  listPiModels,
+  resolvePiModel,
+  runSubagentWithPiSdk,
+} from "./adapter/pi-sdk.ts";
 export type * from "./core/types.ts";
+export type * from "./core/context-sources.ts";
+export type * from "./core/pi-config.ts";
+export type * from "./core/archive-store.ts";
+export type * from "./core/subagent-run.ts";
+export type * from "./adapter/pi-sdk.ts";

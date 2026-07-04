@@ -1,49 +1,59 @@
 # Better Subagent
 
-PI Coding Agent 扩展 — 提供**结构化对话记忆数据库**能力。
+`better-subagent` is a PI Coding Agent extension for running an external subagent with reusable context loading and structured result archiving.
 
-## 能做什么
+## Recommended design
 
-- **对话记忆持久化** — 每轮对话、工具调用、文件引用存成结构化记录（JSONL + Markdown）
-- **上下文按需拼装** — 通过 Recipe 方案定义组装规则，加载时只注入需要的上下文，避免 prompt 膨胀
-- **对话记忆管理** — 通过 `dialogue_memory` 工具对历史对话进行 load / save / query / manage
+Treat the project as three parts:
 
-## 安装
+1. Context loading
+   Load context fragments from JSONL history or files, then concatenate them in caller-provided order.
+2. PI invocation preparation
+   Build the final prompt and execution config that will be sent to PI Coding Agent.
+3. Result archiving
+   Persist tool calls, reasoning, replies, and external file accesses in separate storage shapes for later reuse.
+
+## What the project should and should not do
+
+- It should provide a basic JSONL field loader: choose a file, choose keys, optionally choose record IDs, then concatenate.
+- It should provide a file loader and a loader registry so third parties can register richer source types later.
+- It should provide a basic archive layout for tool calls, messages, and file access registration.
+- It should not decide when to load which context. That policy belongs to callers and tests built on top of the library.
+
+## Storage layout
+
+- `messages.jsonl`
+  Stores both `reasoning` and `reply` records in append order.
+- `tool-calls/`
+  Stores each tool call as its own JSON file, linked to the related message ID.
+- `external-files.jsonl`
+  Registers file read/write accesses without copying file content into the archive.
+
+## Recommended APIs
+
+- `core/context-sources.ts`
+  Context loaders and loader registry.
+- `core/pi-config.ts`
+  Prompt and invocation config builders.
+- `core/archive-store.ts`
+  Structured result archiving.
+- `core/subagent-run.ts`
+  Run request, tool selection, model selection, and turn-id helpers.
+- `adapter/pi-sdk.ts`
+  PI SDK adapter built on `createAgentSession()`, `ModelRegistry`, and `SessionManager.inMemory()`.
+
+## PI SDK notes this project now follows
+
+- The SDK already supports explicit `tools` allowlists.
+- The SDK already supports explicit `model` selection plus `ModelRegistry.find()` and `ModelRegistry.getAvailable()`.
+- `createAgentSession()` can run with `SessionManager.inMemory()` so subagent calls do not need to become normal PI sessions.
+- The default built-in tool set in PI is `read`, `bash`, `edit`, `write`, but this project keeps tools explicit at the adapter boundary for predictability.
+
+The older dialogue-memory CRUD modules are still present for compatibility, but they are no longer the best mental model for new work.
+
+## Development
 
 ```bash
-rm -rf ~/.pi/agent/extensions/better-subagent
-ln -s "$(pwd)" ~/.pi/agent/extensions/better-subagent
-```
-
-安装后 PI 会自动加载以下内容：
-- `skills/better-subagent/SKILL.md` — 指导 agent 使用 `dialogue_memory` 工具
-- `index.ts` — 注册 `dialogue_memory` 工具（load / save / query / manage）
-
-## 项目结构
-
-```
-better-subagent/
-├── index.ts              # PI 扩展入口 + 纯函数 API 导出
-├── core/                 # 引擎层 — 零 PI 依赖的纯函数
-│   ├── crud-factory.ts   #   泛型 CRUD 工厂（消除 5 模块重复）
-│   ├── types.ts          #   共享类型定义
-│   ├── turns.ts          #   对话轮次 CRUD（基于 crud-factory）
-│   ├── tool-calls.ts     #   工具调用记录（基于 crud-factory）
-│   ├── templates.ts      #   模板 CRUD（基于 crud-factory）
-│   ├── file-refs.ts      #   文件引用记录（基于 crud-factory）
-│   ├── call-records.ts   #   调用串联记录（基于 crud-factory）
-│   ├── recipes.ts        #   组装方案（TOML）
-│   ├── build-prompt.ts   #   提示词拼装引擎
-│   └── save-turn.ts      #   一键保存编排
-├── utils/                # JSONL / TOML / Glob 工具
-├── tool/                 # Agent 适配层 — PI 工具注册 + 动作处理
-├── skills/               # PI 自动发现的 skill
-└── docs/                 # 文档
-```
-
-## 开发
-
-```bash
-bun test          # 运行测试
-tsc --noEmit      # 类型检查
+bun test
+bunx tsc --noEmit
 ```
