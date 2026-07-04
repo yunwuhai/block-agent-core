@@ -25,6 +25,7 @@ Supported actions:
 - `create_session`
 - `get_session`
 - `list_sessions`
+- `update_session`
 - `mount_context`
 - `unmount_context`
 - `list_context_mounts`
@@ -56,6 +57,18 @@ Important inputs:
 
 - `sessionId`
 - `sources`
+
+### `update_session`
+
+Update an existing session without rebuilding it.
+
+Important inputs:
+
+- `sessionId`
+- optional `systemPromptFilePaths`
+- optional `modelSelection`
+- optional `tools`
+- optional `sdkOptions`
 
 ### `unmount_context`
 

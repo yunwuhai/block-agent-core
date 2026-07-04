@@ -21,6 +21,7 @@ Supported actions:
 - `create_session`
 - `get_session`
 - `list_sessions`
+- `update_session`
 - `mount_context`
 - `unmount_context`
 - `list_context_mounts`
@@ -37,6 +38,7 @@ Supported actions:
 - A `task` is one input sent to a session.
 - The scheduler runs tasks across sessions with a global max concurrency of `8`.
 - The same session never runs two tasks at the same time.
+- `update_session` changes model, tool, or system prompt config without recreating the session.
 
 Each session stores:
 

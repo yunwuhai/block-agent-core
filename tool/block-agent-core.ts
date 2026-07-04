@@ -3,6 +3,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { handleArchiveSession } from "./actions/archive-session.ts";
 import { handleListModels } from "./actions/list-models.ts";
 import { handleCreateSession, handleGetSession, handleListSessions } from "./actions/create-session.ts";
+import { handleUpdateSession } from "./actions/update-session.ts";
 import { handleListContextMounts, handleMountContext, handleUnmountContext } from "./actions/context-mounts.ts";
 import { handleGetTask, handleListTasks, handleSendTask } from "./actions/send-task.ts";
 import { handleReadEvents } from "./actions/read-events.ts";
@@ -56,6 +57,8 @@ export function registerBlockAgentCoreTool(pi: ExtensionAPI): void {
           return handleGetSession(params as any, ctx);
         case "list_sessions":
           return handleListSessions(params as any, ctx);
+        case "update_session":
+          return handleUpdateSession(params as any, ctx);
         case "mount_context":
           return handleMountContext(params as any, ctx);
         case "unmount_context":
@@ -76,7 +79,7 @@ export function registerBlockAgentCoreTool(pi: ExtensionAPI): void {
           return handleArchiveSession(params as any, ctx);
         default:
           return ok(
-            `Unknown action: ${action}. Use create_session, get_session, list_sessions, mount_context, unmount_context, list_context_mounts, send_task, get_task, list_tasks, read_events, list_models, or archive_session.`,
+            `Unknown action: ${action}. Use create_session, get_session, list_sessions, update_session, mount_context, unmount_context, list_context_mounts, send_task, get_task, list_tasks, read_events, list_models, or archive_session.`,
           );
       }
     },

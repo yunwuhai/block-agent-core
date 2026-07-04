@@ -6,6 +6,7 @@ import { handleSendTask } from "./actions/send-task.ts";
 import { handleGetTask } from "./actions/send-task.ts";
 import { handleReadEvents } from "./actions/read-events.ts";
 import { handleCreateSession } from "./actions/create-session.ts";
+import { handleUpdateSession } from "./actions/update-session.ts";
 import { handleMountContext } from "./actions/context-mounts.ts";
 import { readJsonl } from "../utils/jsonl.ts";
 import { TaskScheduler, resetDefaultTaskSchedulerForTests } from "../core/task-scheduler.ts";
@@ -70,6 +71,45 @@ describe("session-first actions", () => {
     expect(readFileSync(join(sessionDir, "messages.jsonl"), "utf-8")).toBe("");
     expect(readFileSync(join(sessionDir, "tool-calls.jsonl"), "utf-8")).toBe("");
     expect(readFileSync(join(sessionDir, "file-calls.jsonl"), "utf-8")).toBe("");
+  });
+
+  it("updates a session config without clearing mounts", async () => {
+    const promptPathA = join(tmpDir, "prompt-update-a.md");
+    const promptPathB = join(tmpDir, "prompt-update-b.md");
+    const notePath = join(tmpDir, "note-update.md");
+    writeFileSync(promptPathA, "Prompt A", "utf-8");
+    writeFileSync(promptPathB, "Prompt B", "utf-8");
+    writeFileSync(notePath, "Mounted note", "utf-8");
+
+    await handleCreateSession({
+      sessionId: "session-update",
+      systemPromptFilePaths: [promptPathA],
+      sdkMode: "host-inherit",
+      modelSelection: { strategy: "specific", provider: "deepseek", modelId: "deepseek-v4-flash" } as any,
+      tools: { names: ["read", "ls"] },
+    }, createCtx());
+
+    await handleMountContext({
+      sessionId: "session-update",
+      sources: [{ type: "file", filePath: notePath }],
+    } as any, createCtx());
+
+    const result = await handleUpdateSession({
+      sessionId: "session-update",
+      systemPromptFilePaths: [promptPathA, promptPathB],
+      modelSelection: { strategy: "specific", provider: "deepseek", modelId: "deepseek-v4-pro" } as any,
+      tools: { names: ["grep"] },
+    }, createCtx());
+
+    expect(result.content[0]!.text).toContain("\"modelId\": \"deepseek-v4-pro\"");
+    expect(result.content[0]!.text).toContain("\"grep\"");
+
+    const sessionDir = join(tmpDir, ".block-agent-core", "sessions", "session-update");
+    const config = JSON.parse(readFileSync(join(sessionDir, "system-prompts.json"), "utf-8"));
+    expect(config.systemPromptFilePaths).toEqual([promptPathA, promptPathB]);
+    expect(config.mounts).toHaveLength(1);
+    expect(config.tools).toEqual({ names: ["grep"] });
+    expect(config.modelSelection).toEqual({ strategy: "specific", provider: "deepseek", modelId: "deepseek-v4-pro" });
   });
 
   it("mounts context and runs a task with archived reply, tool calls, file calls, and events", async () => {

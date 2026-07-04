@@ -25,6 +25,7 @@
 - `create_session`
 - `get_session`
 - `list_sessions`
+- `update_session`
 - `mount_context`
 - `unmount_context`
 - `list_context_mounts`
@@ -61,6 +62,7 @@
 - `tool-calls.jsonl` 顺序保存工具调用
 - `file-calls.jsonl` 顺序保存文件访问与文件引用
 - `system-prompts.json` 保存固定 system prompts、模型选择、工具选择和 SDK 模式
+- `update_session` 可以直接改动 session 的模型、工具、SDK 参数和 system prompts，而不重建 session
 
 ## 上下文加载
 

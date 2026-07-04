@@ -58,6 +58,7 @@ export {
   readTasks,
   readToolCalls,
   unmountContext,
+  updateSessionConfig,
   updateSessionTask,
   writeSessionConfig,
 } from "./core/session-store.ts";

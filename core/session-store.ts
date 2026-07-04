@@ -236,6 +236,30 @@ export async function writeSessionConfig(cwd: string, config: SessionSystemPromp
   await writeFile(layout.systemPromptsPath, JSON.stringify(nextConfig, null, 2) + "\n", "utf-8");
 }
 
+export async function updateSessionConfig(
+  cwd: string,
+  sessionId: string,
+  patch: {
+    systemPromptFilePaths?: string[];
+    sdkMode?: SessionSdkMode;
+    modelSelection?: SubagentModelSelection;
+    tools?: SubagentToolSelection;
+    sdkOptions?: StandaloneSdkOptions;
+  },
+): Promise<SessionSystemPromptsConfig> {
+  const current = await readSessionConfig(cwd, sessionId);
+  const nextConfig: SessionSystemPromptsConfig = {
+    ...current,
+    ...(patch.systemPromptFilePaths ? { systemPromptFilePaths: [...patch.systemPromptFilePaths] } : {}),
+    ...(patch.sdkMode ? { sdkMode: patch.sdkMode } : {}),
+    ...(patch.modelSelection ? { modelSelection: patch.modelSelection } : {}),
+    ...(patch.tools ? { tools: patch.tools } : {}),
+    ...(patch.sdkOptions ? { sdkOptions: patch.sdkOptions } : {}),
+  };
+  await writeSessionConfig(cwd, nextConfig);
+  return readSessionConfig(cwd, sessionId);
+}
+
 export async function listSessions(cwd: string): Promise<SessionSystemPromptsConfig[]> {
   const rootDir = createSessionsRootDir(cwd);
   if (!existsSync(rootDir)) {
