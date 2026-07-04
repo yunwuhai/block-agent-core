@@ -13,10 +13,6 @@ dist/
 # Logs
 *.log
 
-# Test output & temporary files
-coverage/
-.tmp-*-test-*/
-
 # PI runtime data
 .pi/
 registry.jsonl
