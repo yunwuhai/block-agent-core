@@ -46,7 +46,7 @@ describe("session store", () => {
     expect(config.tools).toEqual({ names: ["read"] });
   });
 
-  it("assigns unique message seq values under concurrent appends", async () => {
+  it("assigns unique message id values under concurrent appends", async () => {
     const promptPath = join(tmpDir, "prompt-concurrent.md");
     writeFileSync(promptPath, "System prompt", "utf-8");
 
@@ -64,11 +64,11 @@ describe("session store", () => {
     ]);
 
     const messages = await readMessages(tmpDir, "session-concurrent");
-    const seqs = messages.map(item => item.seq).sort((a, b) => a - b);
+    const seqs = messages.map(item => item.id).sort((a, b) => a - b);
     expect(seqs).toEqual([1, 2, 3, 4]);
   });
 
-  it("removes descendants by seq range while protecting system prompts", async () => {
+  it("removes descendants by id range", async () => {
     const promptPath = join(tmpDir, "prompt-unmount.md");
     writeFileSync(promptPath, "System prompt", "utf-8");
 
@@ -78,28 +78,27 @@ describe("session store", () => {
       sdkMode: "host-inherit",
     });
 
-    await appendSessionMessage(tmpDir, "session-unmount", { seq: 1, kind: "system_prompt", text: "system" });
-    await appendSessionMessage(tmpDir, "session-unmount", { seq: 2, kind: "input", text: "a", parentSeq: 1 });
-    await appendSessionMessage(tmpDir, "session-unmount", { seq: 3, kind: "reply", text: "b", parentSeq: 2 });
-    await appendSessionMessage(tmpDir, "session-unmount", { seq: 4, kind: "reply", text: "c", parentSeq: 3 });
-    await appendSessionMessage(tmpDir, "session-unmount", { seq: 5, kind: "reply", text: "d", parentSeq: 4 });
+    await appendSessionMessage(tmpDir, "session-unmount", { id: 1, kind: "input", text: "a" });
+    await appendSessionMessage(tmpDir, "session-unmount", { id: 2, kind: "reply", text: "b", parentId: 1 });
+    await appendSessionMessage(tmpDir, "session-unmount", { id: 3, kind: "reply", text: "c", parentId: 2 });
+    await appendSessionMessage(tmpDir, "session-unmount", { id: 4, kind: "reply", text: "d", parentId: 3 });
 
     const { appendSessionEvent } = await import("./session-store.ts");
     await appendSessionEvent(tmpDir, "session-unmount", {
       type: "send_finished",
       payload: {
-        activeMessageSeqRanges: [[2, 5]],
+        activeMessageIdRanges: [[1, 4]],
       },
     });
 
-    const result = await unmountContext(tmpDir, "session-unmount", { seqRanges: [[3, 3], [1, 1]] });
-    expect(result.removedSeqs).toEqual([3, 4, 5]);
+    const result = await unmountContext(tmpDir, "session-unmount", { idRanges: [[3, 3]] });
+    expect(result.removedIds).toEqual([3, 4]);
 
     const state = await readCurrentContextState(tmpDir, "session-unmount");
-    expect(state.activeMessageSeqs).toEqual([2]);
+    expect(state.activeMessageIds).toEqual([1, 2]);
   });
 
-  it("ignores remounted seq ranges that no longer exist after rollback", async () => {
+  it("ignores remounted id ranges that no longer exist after rollback", async () => {
     const promptPath = join(tmpDir, "prompt-missing-remount.md");
     writeFileSync(promptPath, "System prompt", "utf-8");
 
@@ -113,13 +112,13 @@ describe("session store", () => {
     await appendSessionEvent(tmpDir, "session-missing-remount", {
       type: "send_finished",
       payload: {
-        activeMessageSeqRanges: [],
+        activeMessageIdRanges: [],
       },
     });
 
-    await mount(tmpDir, "session-missing-remount", { seqRanges: [[3, 3]] });
+    await mount(tmpDir, "session-missing-remount", { idRanges: [[3, 3]] });
 
     const state = await readCurrentContextState(tmpDir, "session-missing-remount");
-    expect(state.activeMessageSeqs).toEqual([]);
+    expect(state.activeMessageIds).toEqual([]);
   });
 });

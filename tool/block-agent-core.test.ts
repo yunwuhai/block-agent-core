@@ -156,8 +156,7 @@ describe("session-first actions", () => {
         return readFileSync(fileSource.filePath, "utf-8");
       },
       runWithSdk: async (options) => ({
-        runId: options.turnIdentity.runId,
-        turnId: `${options.turnIdentity.runId}:${options.turnIdentity.keyParts.join(":")}`,
+        runId: options.runId,
         model: {
           provider: "deepseek",
           modelId: "deepseek-v4-flash",
@@ -188,14 +187,15 @@ describe("session-first actions", () => {
 
     const sessionDir = join(tmpDir, ".block-agent-core", "sessions", "session-b");
     const messages = await readJsonl<{ kind: string; text?: string }>(join(sessionDir, "messages.jsonl"));
-    expect(messages.map(item => item.kind)).toEqual(["system_prompt", "input", "reasoning", "tool_call", "file_call", "reply"]);
-    expect(messages[0]!.text).toContain("You are a coding session.");
+    expect(messages.map(item => item.kind)).toEqual(["input", "reasoning", "tool_call", "file_call", "reply"]);
+    const systemConfig = JSON.parse(readFileSync(join(sessionDir, "system-config.json"), "utf-8"));
+    expect(systemConfig.systemPromptText).toContain("You are a coding session.");
+    expect(systemConfig.systemPromptFilePaths).toEqual([promptPath]);
 
     const toolCalls = await readJsonl<{ toolName: string }>(join(sessionDir, "tool-calls.jsonl"));
     expect(toolCalls[0]!.toolName).toBe("read");
     const fileCalls = await readJsonl<{ filePath: string }>(join(sessionDir, "file-calls.jsonl"));
     expect(fileCalls.some(item => item.filePath === notePath)).toBe(true);
-    expect(fileCalls.some(item => item.filePath === promptPath)).toBe(true);
   });
 
   it("supports seq-range unmount and remount", async () => {
@@ -210,32 +210,31 @@ describe("session-first actions", () => {
     }, createCtx());
 
     const { appendSessionMessage, appendSessionEvent } = await import("../core/session-store.ts");
-    await appendSessionMessage(tmpDir, "session-range", { seq: 1, kind: "system_prompt", text: "Prompt" });
-    await appendSessionMessage(tmpDir, "session-range", { seq: 2, kind: "input", text: "A", parentSeq: 1 });
-    await appendSessionMessage(tmpDir, "session-range", { seq: 3, kind: "reply", text: "B", parentSeq: 2 });
-    await appendSessionMessage(tmpDir, "session-range", { seq: 4, kind: "reply", text: "C", parentSeq: 3 });
-    await appendSessionMessage(tmpDir, "session-range", { seq: 5, kind: "reply", text: "D", parentSeq: 4 });
+    await appendSessionMessage(tmpDir, "session-range", { id: 1, kind: "input", text: "A" });
+    await appendSessionMessage(tmpDir, "session-range", { id: 2, kind: "reply", text: "B", parentId: 1 });
+    await appendSessionMessage(tmpDir, "session-range", { id: 3, kind: "reply", text: "C", parentId: 2 });
+    await appendSessionMessage(tmpDir, "session-range", { id: 4, kind: "reply", text: "D", parentId: 3 });
     await appendSessionEvent(tmpDir, "session-range", {
       type: "send_finished",
-      payload: { activeMessageSeqRanges: [[2, 5]] },
+      payload: { activeMessageIdRanges: [[1, 4]] },
     });
 
     const unmountResult = await handleUnmountContext({
       sessionId: "session-range",
-      seqRanges: [[3, 4]],
+      idRanges: [[3, 4]],
     }, createCtx());
     expect(unmountResult.content[0]!.text).toContain("Updated active context");
 
     const afterUnmount = JSON.parse((await handleListContextMounts({ sessionId: "session-range" }, createCtx())).content[0]!.text);
-    expect(afterUnmount.activeMessageSeqs).toEqual([2]);
+    expect(afterUnmount.activeMessageIds).toEqual([1, 2]);
 
     await handleMountContext({
       sessionId: "session-range",
-      seqRanges: [[3, 4]],
+      idRanges: [[3, 4]],
     }, createCtx());
 
     const afterRemount = JSON.parse((await handleListContextMounts({ sessionId: "session-range" }, createCtx())).content[0]!.text);
-    expect(afterRemount.activeMessageSeqs).toEqual([2, 3, 4]);
+    expect(afterRemount.activeMessageIds).toEqual([1, 2, 3, 4]);
   });
 
   it("rolls back provisional messages after a failed send retry", async () => {
@@ -266,8 +265,8 @@ describe("session-first actions", () => {
     await waitForSendFinish("session-fail-retry", "send-1");
 
     const sessionDir = join(tmpDir, ".block-agent-core", "sessions", "session-fail-retry");
-    const messagesAfterFirstFail = await readJsonl<{ seq: number; kind: string }>(join(sessionDir, "messages.jsonl"));
-    const fileCallsAfterFirstFail = await readJsonl<{ seq: number; filePath: string }>(join(sessionDir, "file-calls.jsonl"));
+    const messagesAfterFirstFail = await readJsonl<{ id: number; kind: string }>(join(sessionDir, "messages.jsonl"));
+    const fileCallsAfterFirstFail = await readJsonl<{ id: number; filePath: string }>(join(sessionDir, "file-calls.jsonl"));
     expect(messagesAfterFirstFail).toEqual([]);
     expect(fileCallsAfterFirstFail).toEqual([]);
 
@@ -278,15 +277,15 @@ describe("session-first actions", () => {
     }, createCtx(), failingDeps);
     await waitForSendFinish("session-fail-retry", "send-2");
 
-    const messagesAfterSecondFail = await readJsonl<{ seq: number; kind: string }>(join(sessionDir, "messages.jsonl"));
-    const fileCallsAfterSecondFail = await readJsonl<{ seq: number; filePath: string }>(join(sessionDir, "file-calls.jsonl"));
+    const messagesAfterSecondFail = await readJsonl<{ id: number; kind: string }>(join(sessionDir, "messages.jsonl"));
+    const fileCallsAfterSecondFail = await readJsonl<{ id: number; filePath: string }>(join(sessionDir, "file-calls.jsonl"));
     expect(messagesAfterSecondFail).toEqual([]);
     expect(fileCallsAfterSecondFail).toEqual([]);
 
     const mountsState = JSON.parse((await handleListContextMounts({
       sessionId: "session-fail-retry",
     }, createCtx())).content[0]!.text);
-    expect(mountsState.activeMessageSeqs).toEqual([]);
+    expect(mountsState.activeMessageIds).toEqual([]);
   });
 });
 

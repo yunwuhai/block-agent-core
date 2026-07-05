@@ -7,7 +7,7 @@
 标准工作流是：
 
 1. 创建持久 session
-2. 挂载外部上下文或历史 `seq` 区间
+2. 挂载外部上下文或历史 `id` 区间
 3. 发送一条新的输入消息
 4. 由调度器执行本次 send
 5. 通过归档文件和事件日志检查结果
@@ -44,13 +44,13 @@
 - `events.jsonl`
 - `system-config.json`
 
-其中 `messages.jsonl` 是唯一上下文主轴，使用 `seq` 和 `parentSeq` 表示顺序与分支连接。
+其中 `messages.jsonl` 是唯一上下文主轴，使用 `id` 和 `parentId` 表示顺序与分支连接。
 
 ## Message 模型
 
 支持的 message kind：
 
-- `system_prompt`
+- `system-config.json`
 - `input`
 - `reasoning`
 - `reply`
@@ -60,10 +60,10 @@
 规则：
 
 - 每次实际发送前，system prompt 文本会先实体化写入 `messages.jsonl`
-- 本轮第一条 `input` 的 `parentSeq` 指向最后一条 `system_prompt`
+- 本轮第一条 `input` 的 `parentId` 指向最后一条 `system-config.json`
 - `tool_call` message 会展开同一条工具调用的参数和结果
 - `file_call` message 会引用 `file-calls.jsonl`
-- `system_prompt` message 默认不可被普通卸载移除
+- `system-config.json` message 默认不可被普通卸载移除
 
 ## 上下文挂载
 
@@ -81,7 +81,7 @@
 
 - 最新 `send_finished` 快照
 - 之后的 `manual_mount` / `manual_unmount` 事件
-- messages 的 `parentSeq` 链接
+- messages 的 `parentId` 链接
 
 项目不再维护独立的 task 表或 round 表。
 

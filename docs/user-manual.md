@@ -7,7 +7,7 @@
 The normal workflow is:
 
 1. Create a persistent session.
-2. Mount source context or historical `seq` ranges.
+2. Mount source context or historical `id` ranges.
 3. Send one new input message.
 4. Let the scheduler run the send.
 5. Inspect archives and event logs.
@@ -44,13 +44,13 @@ Runtime files:
 - `events.jsonl`
 - `system-config.json`
 
-`messages.jsonl` is the only context mainline and uses `seq` plus `parentSeq`.
+`messages.jsonl` is the only context mainline and uses `id` plus `parentId`.
 
 ## Message Model
 
 Supported message kinds:
 
-- `system_prompt`
+- `system-config.json`
 - `input`
 - `reasoning`
 - `reply`

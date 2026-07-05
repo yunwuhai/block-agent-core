@@ -1,6 +1,6 @@
 import {
   appendSessionEvent,
-  compressMessageSequences,
+  compressMessageRanges,
   readCurrentContextState,
   readSessionConfig,
 } from "../../core/session-store.ts";
@@ -58,7 +58,7 @@ export async function handleSendMessage(
     const registeredAt = new Date().toISOString();
 
     const { queuePosition } = scheduler.enqueue({
-      taskId: params.requestKey ?? `${params.sessionId}:${created.inputMessage.seq}`,
+      taskId: params.requestKey ?? `${params.sessionId}:${created.inputMessage.id}`,
       sessionId: params.sessionId,
       registeredAt: Date.now(),
       execute: async () => {
@@ -66,9 +66,8 @@ export async function handleSendMessage(
           const result = await executeSessionTask(ctx.cwd, params.sessionId, {
             ...(params.requestKey ? { requestKey: params.requestKey } : {}),
             inputText: params.inputText,
-            inputSeq: created.inputMessage.seq,
-            ...(created.parentSeq !== undefined ? { parentSeq: created.parentSeq } : {}),
-            systemPromptSeqs: created.systemPromptSeqs,
+            inputId: created.inputMessage.id,
+            ...(created.parentId !== undefined ? { parentId: created.parentId } : {}),
             ...(params.temporarySources ? { temporarySources: params.temporarySources } : {}),
             ...(params.metadata ? { metadata: params.metadata } : {}),
           }, ctx, runtimeDeps);
@@ -78,11 +77,10 @@ export async function handleSendMessage(
             type: "send_finished",
             payload: {
               status: "completed",
-              inputSeq: created.inputMessage.seq,
-              ...(created.parentSeq !== undefined ? { parentSeq: created.parentSeq } : {}),
-              systemPromptSeqRanges: compressMessageSequences(created.systemPromptSeqs),
-              outputMessageSeqRanges: compressMessageSequences(result.outputMessageSeqs),
-              activeMessageSeqRanges: compressMessageSequences(result.activeMessageSeqs),
+              inputId: created.inputMessage.id,
+              ...(created.parentId !== undefined ? { parentId: created.parentId } : {}),
+              outputMessageIdRanges: compressMessageRanges(result.outputMessageIds),
+              activeMessageIdRanges: compressMessageRanges(result.activeMessageIds),
               model: result.model,
               tools: result.tools,
             },
@@ -94,10 +92,9 @@ export async function handleSendMessage(
             type: "send_finished",
             payload: {
               status: "failed",
-              inputSeq: created.inputMessage.seq,
-              ...(created.parentSeq !== undefined ? { parentSeq: created.parentSeq } : {}),
-              systemPromptSeqRanges: compressMessageSequences(created.systemPromptSeqs),
-              activeMessageSeqRanges: compressMessageSequences(previousState.activeMessageSeqs),
+              inputId: created.inputMessage.id,
+              ...(created.parentId !== undefined ? { parentId: created.parentId } : {}),
+              activeMessageIdRanges: compressMessageRanges(previousState.activeMessageIds),
               errorMessage: (err as Error).message,
             },
           });
@@ -111,9 +108,8 @@ export async function handleSendMessage(
       payload: {
         queuePosition,
         registeredAt,
-        inputSeq: created.inputMessage.seq,
-        ...(created.parentSeq !== undefined ? { parentSeq: created.parentSeq } : {}),
-        systemPromptSeqRanges: compressMessageSequences(created.systemPromptSeqs),
+        inputId: created.inputMessage.id,
+        ...(created.parentId !== undefined ? { parentId: created.parentId } : {}),
       },
     });
 
@@ -122,8 +118,8 @@ export async function handleSendMessage(
       status: "queued",
       registeredAt,
       queuePosition,
-      inputSeq: created.inputMessage.seq,
-      ...(created.parentSeq !== undefined ? { parentSeq: created.parentSeq } : {}),
+      inputId: created.inputMessage.id,
+      ...(created.parentId !== undefined ? { parentId: created.parentId } : {}),
       ...(params.requestKey ? { requestKey: params.requestKey } : {}),
     };
     return ok(JSON.stringify({ send }, null, 2), { send });

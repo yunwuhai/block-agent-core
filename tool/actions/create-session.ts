@@ -46,9 +46,9 @@ export async function handleGetSession(
     return ok(JSON.stringify({
       session: config,
       activeMounts,
-      activeMessageSeqs: currentState.activeMessageSeqs,
+      activeMessageIds: currentState.activeMessageIds,
       layout: createSessionLayout(ctx.cwd, params.sessionId),
-    }, null, 2), { session: config, activeMounts, activeMessageSeqs: currentState.activeMessageSeqs });
+    }, null, 2), { session: config, activeMounts, activeMessageIds: currentState.activeMessageIds });
   } catch (err) {
     return error(`Error getting session: ${(err as Error).message}`);
   }

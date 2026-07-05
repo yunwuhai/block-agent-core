@@ -84,7 +84,7 @@ export async function loadJsonlFieldsSource(source: JsonlFieldsSource): Promise<
       return false;
     }
     if (source.startSequence !== undefined || source.endSequence !== undefined) {
-      const sequence = Number(getNestedValue(record, "seq") ?? getNestedValue(record, "sequence"));
+      const sequence = Number(getNestedValue(record, "sequence") ?? getNestedValue(record, "id"));
       if (Number.isNaN(sequence)) {
         return false;
       }
@@ -113,9 +113,9 @@ export async function loadJsonlFieldsSource(source: JsonlFieldsSource): Promise<
 
   function expandRecord(record: Record<string, unknown>): string {
     const kind = typeof record.kind === "string" ? record.kind : undefined;
-    if (kind === "tool_call" && Number.isInteger(Number(record.toolCallSeq))) {
-      const toolCallSeq = Number(record.toolCallSeq);
-      const toolCall = toolCallRecords?.find(item => Number(item.seq ?? -1) === toolCallSeq);
+    if (kind === "tool_call" && Number.isInteger(Number(record.toolCallId))) {
+      const lookupId = Number(record.toolCallId);
+      const toolCall = toolCallRecords?.find(item => Number(item.id ?? -1) === lookupId);
       if (!toolCall) return "";
       return [
         `Tool: ${String(toolCall.toolName ?? "")}`,
@@ -124,9 +124,9 @@ export async function loadJsonlFieldsSource(source: JsonlFieldsSource): Promise<
         `Result: ${JSON.stringify(toolCall.result ?? null, null, 2)}`,
       ].join("\n");
     }
-    if (kind === "file_call" && Number.isInteger(Number(record.fileCallSeq))) {
-      const fileCallSeq = Number(record.fileCallSeq);
-      const fileCall = fileCallRecords?.find(item => Number(item.seq ?? -1) === fileCallSeq);
+    if (kind === "file_call" && Number.isInteger(Number(record.fileCallId))) {
+      const lookupId = Number(record.fileCallId);
+      const fileCall = fileCallRecords?.find(item => Number(item.id ?? -1) === lookupId);
       if (!fileCall) return "";
       return [
         `File: ${String(fileCall.filePath ?? "")}`,

@@ -17,13 +17,6 @@ export const PI_DEFAULT_SUBAGENT_TOOLS = [
 
 export type PiBuiltinTool = typeof PI_BUILTIN_TOOLS[number];
 
-export interface SubagentTurnIdentity {
-  runId: string;
-  keyParts: string[];
-  prefix?: string;
-  separator?: string;
-}
-
 export interface SubagentModelCurrentSelection {
   strategy: "current";
 }
@@ -54,16 +47,6 @@ export interface SubagentRunRequest {
   cwd?: string;
   modelSelection?: SubagentModelSelection;
   tools?: SubagentToolSelection;
-}
-
-export function composeSubagentTurnId(identity: SubagentTurnIdentity): string {
-  const separator = identity.separator ?? ":";
-  const parts = [
-    identity.prefix,
-    identity.runId,
-    ...identity.keyParts,
-  ].filter((part): part is string => Boolean(part && part.length > 0));
-  return parts.join(separator);
 }
 
 export function normalizeToolNames(selection?: SubagentToolSelection): string[] {

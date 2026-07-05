@@ -1,14 +1,12 @@
-import { readFile } from "node:fs/promises";
 import {
   appendSessionEvent,
   appendSessionFileCall,
   appendSessionMessage,
   appendSessionToolCall,
-  compressMessageSequences,
+  compressMessageRanges,
   getCurrentParentSequence,
   listContextMounts,
-  removeSessionFileCallsBySeq,
-  removeSessionMessagesBySeq,
+  removeSessionMessagesById,
   readCurrentContextState,
   readFileCalls,
   readMessages,
@@ -31,9 +29,8 @@ export interface SessionTaskRunnerDeps {
 export interface SessionSendRequest {
   requestKey?: string;
   inputText: string;
-  inputSeq: number;
-  parentSeq?: number;
-  systemPromptSeqs: number[];
+  inputId: number;
+  parentId?: number;
   temporarySources?: ContextSource[];
   metadata?: Record<string, unknown>;
 }
@@ -43,14 +40,12 @@ export interface SessionTaskExecutionResult {
   model: PiSdkRunResult["model"];
   tools: string[];
   prompt: string;
-  outputMessageSeqs: number[];
-  activeMessageSeqs: number[];
+  outputMessageIds: number[];
+  activeMessageIds: number[];
 }
 
 export interface CreatedInputArtifacts {
-  parentSeq?: number;
-  systemPromptSeqs: number[];
-  systemPromptFileCallSeqs: number[];
+  parentId?: number;
   inputMessage: SessionMessageRecord;
 }
 
@@ -84,17 +79,17 @@ function formatFileCallMessage(record: SessionFileCallRecord): string {
 
 function resolveExpandedMessageText(
   message: SessionMessageRecord,
-  toolCallsBySeq: Map<number, { toolName: string; params: unknown; result: unknown; error?: boolean }>,
-  fileCallsBySeq: Map<number, SessionFileCallRecord>,
+  toolCallsById: Map<number, { toolName: string; params: unknown; result: unknown; error?: boolean }>,
+  fileCallsById: Map<number, SessionFileCallRecord>,
 ): string {
-  if (message.kind === "tool_call" && typeof message.toolCallSeq === "number") {
-    const toolCall = toolCallsBySeq.get(message.toolCallSeq);
+  if (message.kind === "tool_call" && typeof message.toolCallId === "number") {
+    const toolCall = toolCallsById.get(message.toolCallSeq);
     if (toolCall) {
       return formatToolCallMessage(toolCall);
     }
   }
-  if (message.kind === "file_call" && typeof message.fileCallSeq === "number") {
-    const fileCall = fileCallsBySeq.get(message.fileCallSeq);
+  if (message.kind === "file_call" && typeof message.fileCallId === "number") {
+    const fileCall = fileCallsById.get(message.fileCallSeq);
     if (fileCall) {
       return formatFileCallMessage(fileCall);
     }
@@ -102,26 +97,26 @@ function resolveExpandedMessageText(
   return message.text ?? "";
 }
 
-async function buildSessionHistoryContext(cwd: string, sessionId: string): Promise<{ text: string; activeMessageSeqs: number[] }> {
+async function buildSessionHistoryContext(cwd: string, sessionId: string): Promise<{ text: string; activeMessageIds: number[] }> {
   const state = await readCurrentContextState(cwd, sessionId);
-  if (state.activeMessageSeqs.length === 0) {
-    return { text: "", activeMessageSeqs: [] };
+  if (state.activeMessageIds.length === 0) {
+    return { text: "", activeMessageIds: [] };
   }
   const [messages, toolCalls, fileCalls] = await Promise.all([
     readMessages(cwd, sessionId),
     readToolCalls(cwd, sessionId),
     readFileCalls(cwd, sessionId),
   ]);
-  const activeSet = new Set(state.activeMessageSeqs);
-  const toolCallsBySeq = new Map(toolCalls.map(record => [record.seq, record]));
-  const fileCallsBySeq = new Map(fileCalls.map(record => [record.seq, record]));
+  const activeSet = new Set(state.activeMessageIds);
+  const toolCallsById = new Map(toolCalls.map(record => [record.id, record]));
+  const fileCallsById = new Map(fileCalls.map(record => [record.id, record]));
   const text = messages
-    .filter(message => activeSet.has(message.seq))
-    .sort((a, b) => a.seq - b.seq)
-    .map(message => resolveExpandedMessageText(message, toolCallsBySeq, fileCallsBySeq))
+    .filter(message => activeSet.has(message.id))
+    .sort((a, b) => a.id - b.id)
+    .map(message => resolveExpandedMessageText(message, toolCallsById, fileCallsById))
     .filter(part => part.trim().length > 0)
     .join("\n\n");
-  return { text, activeMessageSeqs: state.activeMessageSeqs };
+  return { text, activeMessageIds: state.activeMessageIds };
 }
 
 export async function createInputMessage(
@@ -131,43 +126,18 @@ export async function createInputMessage(
   requestKey?: string,
   metadata?: Record<string, unknown>,
 ): Promise<CreatedInputArtifacts> {
-  const config = await readSessionConfig(cwd, sessionId);
-  let currentParentSeq = await getCurrentParentSequence(cwd, sessionId);
-  const systemPromptSeqs: number[] = [];
-  const systemPromptFileCallSeqs: number[] = [];
-
-  for (const filePath of config.systemPromptFilePaths) {
-    const text = await readFile(filePath, "utf-8");
-    const fileCall = await appendSessionFileCall(cwd, sessionId, {
-      filePath,
-      ...(requestKey ? { requestKey } : {}),
-      metadata: { kind: "system_prompt_source" },
-    });
-    systemPromptFileCallSeqs.push(fileCall.seq);
-    const message = await appendSessionMessage(cwd, sessionId, {
-      kind: "system_prompt",
-      text,
-      ...(currentParentSeq !== undefined ? { parentSeq: currentParentSeq } : {}),
-      ...(requestKey ? { requestKey } : {}),
-      fileCallSeq: fileCall.seq,
-      metadata: { sourceFilePath: filePath },
-    });
-    systemPromptSeqs.push(message.seq);
-    currentParentSeq = message.seq;
-  }
+  const parentId = await getCurrentParentSequence(cwd, sessionId);
 
   const inputMessage = await appendSessionMessage(cwd, sessionId, {
     kind: "input",
     text: inputText,
-    ...(currentParentSeq !== undefined ? { parentSeq: currentParentSeq } : {}),
+    ...(parentId !== undefined ? { parentId } : {}),
     ...(requestKey ? { requestKey } : {}),
     ...(metadata ? { metadata } : {}),
   });
 
   return {
-    ...(inputMessage.parentSeq !== undefined ? { parentSeq: inputMessage.parentSeq } : {}),
-    systemPromptSeqs,
-    systemPromptFileCallSeqs,
+    ...(inputMessage.parentId !== undefined ? { parentId: inputMessage.parentId } : {}),
     inputMessage,
   };
 }
@@ -177,10 +147,7 @@ export async function rollbackCreatedInputArtifacts(
   sessionId: string,
   created: CreatedInputArtifacts,
 ): Promise<void> {
-  await Promise.all([
-    removeSessionMessagesBySeq(cwd, sessionId, [...created.systemPromptSeqs, created.inputMessage.seq]),
-    removeSessionFileCallsBySeq(cwd, sessionId, created.systemPromptFileCallSeqs),
-  ]);
+  await removeSessionMessagesById(cwd, sessionId, [created.inputMessage.id]);
 }
 
 export async function executeSessionTask(
@@ -204,40 +171,33 @@ export async function executeSessionTask(
     request.temporarySources?.length ? deps.composeContextText(request.temporarySources, "\n\n") : Promise.resolve(""),
   ]);
 
-  const systemPromptMessages = await readMessages(cwd, sessionId);
-  const systemPromptText = systemPromptMessages
-    .filter(message => request.systemPromptSeqs.includes(message.seq))
-    .sort((a, b) => a.seq - b.seq)
-    .map(message => message.text ?? "")
-    .filter(Boolean)
-    .join("\n\n");
+  const systemPromptText = config.systemPromptText;
 
   const context = [mountedContext, historyContext.text, temporaryContext]
     .filter(part => part.trim().length > 0)
     .join("\n\n");
 
-  const sentMessageSeqs = [...request.systemPromptSeqs, ...historyContext.activeMessageSeqs, request.inputSeq];
+  const sentMessageIds = [...historyContext.activeMessageIds, request.inputId];
   await appendSessionEvent(cwd, sessionId, {
     ...(request.requestKey ? { requestKey: request.requestKey } : {}),
     type: "send_started",
     payload: {
-      inputSeq: request.inputSeq,
-      ...(request.parentSeq !== undefined ? { parentSeq: request.parentSeq } : {}),
-      systemPromptSeqRanges: compressMessageSequences(request.systemPromptSeqs),
-      sentMessageSeqRanges: compressMessageSequences(sentMessageSeqs),
+      inputId: request.inputId,
+      ...(request.parentId !== undefined ? { parentId: request.parentId } : {}),
+      sentMessageIdRanges: compressMessageRanges(sentMessageIds),
       activeMountIds: activeMounts.map(mount => mount.id),
     },
   });
+
+  const pendingStarted = new Map<string, Record<string, unknown>>();
+  const pendingFinished = new Map<string, Record<string, unknown>>();
 
   const result = await deps.runWithSdk({
     inputText: request.inputText,
     context,
     systemPrompt: systemPromptText,
     cwd,
-    turnIdentity: {
-      runId: sessionId,
-      keyParts: [request.requestKey ?? `send-${request.inputSeq}`],
-    },
+    runId: sessionId,
     ...(ctx.authStorage ? { authStorage: ctx.authStorage } : {}),
     ...(ctx.piSdkModule ? { piSdkModule: ctx.piSdkModule } : {}),
     modelRegistry: ctx.modelRegistry,
@@ -248,33 +208,27 @@ export async function executeSessionTask(
     ...(config.sdkOptions ? { sdkOptions: config.sdkOptions } : {}),
     onEvent: async (event) => {
       if (event.type === "tool_call_started") {
-        await appendSessionEvent(cwd, sessionId, {
-          ...(request.requestKey ? { requestKey: request.requestKey } : {}),
-          type: "tool_send_started",
-          payload: event.payload,
-        });
+        pendingStarted.set(event.payload.toolCallId as string, event.payload);
       }
       if (event.type === "tool_call_finished") {
-        await appendSessionEvent(cwd, sessionId, {
-          ...(request.requestKey ? { requestKey: request.requestKey } : {}),
-          type: "tool_send_finished",
-          payload: event.payload,
-        });
+        pendingFinished.set(event.payload.toolCallId as string, event.payload);
       }
     },
   });
 
-  const outputMessageSeqs: number[] = [];
-  let currentParentSeq = request.inputSeq;
+  const outputMessageIds: number[] = [];
+  let currentParentId = request.inputId;
 
   const reasoningMessage = await appendSessionMessage(cwd, sessionId, {
     kind: "reasoning",
     text: result.reasoningText,
-    parentSeq: currentParentSeq,
+    parentId: currentParentId,
     ...(request.requestKey ? { requestKey: request.requestKey } : {}),
   });
-  outputMessageSeqs.push(reasoningMessage.seq);
-  currentParentSeq = reasoningMessage.seq;
+  outputMessageIds.push(reasoningMessage.id);
+  currentParentId = reasoningMessage.id;
+
+  const sdkToLocalId = new Map<string, number>();
 
   for (const trace of result.toolCalls) {
     const toolCallRecord = await appendSessionToolCall(cwd, sessionId, {
@@ -286,14 +240,16 @@ export async function executeSessionTask(
       ...(trace.metadata ? { metadata: trace.metadata } : {}),
     });
 
+    sdkToLocalId.set(trace.id, toolCallRecord.id);
+
     const toolCallMessage = await appendSessionMessage(cwd, sessionId, {
       kind: "tool_call",
-      parentSeq: currentParentSeq,
+      parentId: currentParentId,
       ...(request.requestKey ? { requestKey: request.requestKey } : {}),
-      toolCallSeq: toolCallRecord.seq,
+      toolCallId: toolCallRecord.id,
     });
-    outputMessageSeqs.push(toolCallMessage.seq);
-    currentParentSeq = toolCallMessage.seq;
+    outputMessageIds.push(toolCallMessage.id);
+    currentParentId = toolCallMessage.id;
 
     const filePath = inferFilePath(trace.params);
     if (filePath && isFileAccessTool(trace.toolName)) {
@@ -303,31 +259,53 @@ export async function executeSessionTask(
       });
       const fileCallMessage = await appendSessionMessage(cwd, sessionId, {
         kind: "file_call",
-        parentSeq: currentParentSeq,
+        parentId: currentParentId,
         ...(request.requestKey ? { requestKey: request.requestKey } : {}),
-        fileCallSeq: fileCallRecord.seq,
+        fileCallId: fileCallRecord.id,
       });
-      outputMessageSeqs.push(fileCallMessage.seq);
-      currentParentSeq = fileCallMessage.seq;
+      outputMessageIds.push(fileCallMessage.id);
+      currentParentId = fileCallMessage.id;
+    }
+  }
+
+  // Write deferred tool events with only local tool call ids
+  for (const [sdkId, _startedPayload] of pendingStarted) {
+    const localId = sdkToLocalId.get(sdkId);
+    if (localId !== undefined) {
+      await appendSessionEvent(cwd, sessionId, {
+        ...(request.requestKey ? { requestKey: request.requestKey } : {}),
+        type: "tool_send_started",
+        payload: { toolCallId: localId },
+      });
+    }
+  }
+  for (const [sdkId, _finishedPayload] of pendingFinished) {
+    const localId = sdkToLocalId.get(sdkId);
+    if (localId !== undefined) {
+      await appendSessionEvent(cwd, sessionId, {
+        ...(request.requestKey ? { requestKey: request.requestKey } : {}),
+        type: "tool_send_finished",
+        payload: { toolCallId: localId },
+      });
     }
   }
 
   const replyMessage = await appendSessionMessage(cwd, sessionId, {
     kind: "reply",
     text: result.replyText,
-    parentSeq: currentParentSeq,
+    parentId: currentParentId,
     ...(request.requestKey ? { requestKey: request.requestKey } : {}),
   });
-  outputMessageSeqs.push(replyMessage.seq);
+  outputMessageIds.push(replyMessage.id);
 
-  const activeMessageSeqs = [...historyContext.activeMessageSeqs, request.inputSeq, ...outputMessageSeqs];
+  const activeMessageIds = [...historyContext.activeMessageIds, request.inputId, ...outputMessageIds];
 
   return {
     ...(request.requestKey ? { requestKey: request.requestKey } : {}),
     model: result.model,
     tools: result.tools,
     prompt: result.prompt,
-    outputMessageSeqs,
-    activeMessageSeqs,
+    outputMessageIds,
+    activeMessageIds,
   };
 }

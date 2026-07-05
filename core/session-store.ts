@@ -8,7 +8,7 @@ import type { SubagentModelSelection, SubagentToolSelection } from "./subagent-r
 const fileLocks = new Map<string, Promise<void>>();
 
 export type SessionSdkMode = "host-inherit" | "standalone-sdk";
-export type SessionMessageKind = "system_prompt" | "input" | "reasoning" | "reply" | "tool_call" | "file_call";
+export type SessionMessageKind = "input" | "reasoning" | "reply" | "tool_call" | "file_call";
 
 export interface StandaloneSdkOptions {
   sdkModulePath?: string;
@@ -25,7 +25,7 @@ export interface StandaloneSdkOptions {
 export interface ContextMount {
   id: number;
   sources?: ContextSource[];
-  seqRanges?: number[][];
+  idRanges?: number[][];
   metadata?: Record<string, unknown>;
 }
 
@@ -34,6 +34,7 @@ export interface SessionSystemConfig {
   createdAt: string;
   updatedAt: string;
   systemPromptFilePaths: string[];
+  systemPromptText: string;
   sdkMode: SessionSdkMode;
   modelSelection?: SubagentModelSelection;
   tools?: SubagentToolSelection;
@@ -41,12 +42,12 @@ export interface SessionSystemConfig {
 }
 
 export interface SessionMessageRecord {
-  seq: number;
+  id: number;
   kind: SessionMessageKind;
   text?: string;
-  parentSeq?: number;
-  toolCallSeq?: number;
-  fileCallSeq?: number;
+  parentId?: number;
+  toolCallId?: number;
+  fileCallId?: number;
   requestKey?: string;
   tags?: string[];
   handoff?: string;
@@ -54,7 +55,7 @@ export interface SessionMessageRecord {
 }
 
 export interface SessionToolCallRecord {
-  seq: number;
+  id: number;
   toolName: string;
   params: unknown;
   result: unknown;
@@ -64,14 +65,14 @@ export interface SessionToolCallRecord {
 }
 
 export interface SessionFileCallRecord {
-  seq: number;
+  id: number;
   filePath: string;
   requestKey?: string;
   metadata?: Record<string, unknown>;
 }
 
 export interface SessionEventRecord {
-  seq: number;
+  id: number;
   type: string;
   createdAt: string;
   requestKey?: string;
@@ -165,39 +166,35 @@ function normalizeRanges(ranges: unknown): number[][] {
   return toNumberRanges(fromNumberRanges(ranges));
 }
 
-function isSystemPromptMessage(message: Pick<SessionMessageRecord, "kind"> | undefined): boolean {
-  return message?.kind === "system_prompt";
-}
-
 function buildChildrenMap(messages: SessionMessageRecord[]): Map<number, number[]> {
   const map = new Map<number, number[]>();
   for (const message of messages) {
-    const parentSeq = message.parentSeq;
-    if (typeof parentSeq !== "number" || !Number.isInteger(parentSeq)) {
+    const parentId = message.parentId;
+    if (typeof parentId !== "number" || !Number.isInteger(parentId)) {
       continue;
     }
-    const children = map.get(parentSeq) ?? [];
-    children.push(message.seq);
-    map.set(parentSeq, children);
+    const children = map.get(parentId) ?? [];
+    children.push(message.id);
+    map.set(parentId, children);
   }
   return map;
 }
 
-function collectDescendantSeqs(
-  startingSeqs: number[],
-  activeSeqs: Set<number>,
+function collectDescendantIds(
+  startingIds: number[],
+  activeIds: Set<number>,
   childrenByParent: Map<number, number[]>,
 ): number[] {
   const seen = new Set<number>();
-  const queue = [...startingSeqs];
+  const queue = [...startingIds];
   while (queue.length > 0) {
     const current = queue.shift()!;
-    if (seen.has(current) || !activeSeqs.has(current)) {
+    if (seen.has(current) || !activeIds.has(current)) {
       continue;
     }
     seen.add(current);
     for (const child of childrenByParent.get(current) ?? []) {
-      if (activeSeqs.has(child) && !seen.has(child)) {
+      if (activeIds.has(child) && !seen.has(child)) {
         queue.push(child);
       }
     }
@@ -205,20 +202,19 @@ function collectDescendantSeqs(
   return [...seen].sort((a, b) => a - b);
 }
 
-function removeSeqsAndDescendants(
-  activeSeqs: Set<number>,
-  seqRanges: number[][],
-  messagesBySeq: Map<number, SessionMessageRecord>,
+function removeIdsAndDescendants(
+  activeIds: Set<number>,
+  idRanges: number[][],
+  messagesById: Map<number, SessionMessageRecord>,
   childrenByParent: Map<number, number[]>,
 ): number[] {
-  const seedSeqs = fromNumberRanges(seqRanges)
-    .filter(seq => activeSeqs.has(seq))
-    .filter(seq => !isSystemPromptMessage(messagesBySeq.get(seq)));
-  const removedSeqs = collectDescendantSeqs(seedSeqs, activeSeqs, childrenByParent);
-  for (const seq of removedSeqs) {
-    activeSeqs.delete(seq);
+  const seedIds = fromNumberRanges(idRanges)
+    .filter(id => activeIds.has(id));
+  const removedIds = collectDescendantIds(seedIds, activeIds, childrenByParent);
+  for (const id of removedIds) {
+    activeIds.delete(id);
   }
-  return removedSeqs;
+  return removedIds;
 }
 
 async function readLegacySystemConfig(layout: SessionLayout): Promise<SessionSystemConfig | undefined> {
@@ -235,6 +231,7 @@ async function readLegacySystemConfig(layout: SessionLayout): Promise<SessionSys
     systemPromptFilePaths: Array.isArray(parsed.systemPromptFilePaths)
       ? parsed.systemPromptFilePaths.filter((item): item is string => typeof item === "string")
       : [],
+    systemPromptText: typeof parsed.systemPromptText === "string" ? parsed.systemPromptText : "",
     sdkMode: parsed.sdkMode === "standalone-sdk" ? "standalone-sdk" : "host-inherit",
     ...(parsed.modelSelection ? { modelSelection: parsed.modelSelection as SubagentModelSelection } : {}),
     ...(parsed.tools ? { tools: parsed.tools as SubagentToolSelection } : {}),
@@ -276,7 +273,7 @@ async function rewriteJsonlRecords<T>(
   await writeFile(filePath, nextContent, "utf-8");
 }
 
-async function getNextSeq(filePath: string, key: string = "seq"): Promise<number> {
+async function getNextId(filePath: string, key: string = "id"): Promise<number> {
   const records = await readJsonl<Record<string, unknown>>(filePath);
   const maxSeq = records.reduce((max, record) => {
     const value = Number(record[key] ?? 0);
@@ -298,14 +295,14 @@ function parseContextMount(payload: Record<string, unknown>): ContextMount | und
   const sources = Array.isArray(candidate.sources)
     ? candidate.sources as ContextSource[]
     : undefined;
-  const seqRanges = normalizeRanges(candidate.seqRanges);
+  const idRanges = normalizeRanges(candidate.idRanges);
   const metadata = candidate.metadata && typeof candidate.metadata === "object"
     ? candidate.metadata as Record<string, unknown>
     : undefined;
   return {
     id,
     ...(sources?.length ? { sources } : {}),
-    ...(seqRanges.length ? { seqRanges } : {}),
+    ...(idRanges.length ? { idRanges } : {}),
     ...(metadata ? { metadata } : {}),
   };
 }
@@ -320,11 +317,21 @@ export async function createSession(
   }
 
   const createdAt = nowIso();
+
+  // Read and concatenate system prompt files
+  const systemPromptTexts: string[] = [];
+  for (const filePath of input.systemPromptFilePaths) {
+    const text = await readFile(filePath, "utf-8");
+    systemPromptTexts.push(text);
+  }
+  const systemPromptText = systemPromptTexts.join("\n\n");
+
   const config: SessionSystemConfig = {
     sessionId: input.sessionId,
     createdAt,
     updatedAt: createdAt,
     systemPromptFilePaths: [...input.systemPromptFilePaths],
+    systemPromptText,
     sdkMode: input.sdkMode,
     ...(input.modelSelection ? { modelSelection: input.modelSelection } : {}),
     ...(input.tools ? { tools: input.tools } : {}),
@@ -444,20 +451,20 @@ export async function readEvents(cwd: string, sessionId: string): Promise<Sessio
   return readJsonl<SessionEventRecord>(createSessionLayout(cwd, sessionId).eventsPath);
 }
 
-export async function getNextMessageSequence(cwd: string, sessionId: string): Promise<number> {
-  return getNextSeq(createSessionLayout(cwd, sessionId).messagesPath);
+export async function getNextMessageId(cwd: string, sessionId: string): Promise<number> {
+  return getNextId(createSessionLayout(cwd, sessionId).messagesPath);
 }
 
 export async function appendSessionMessage(
   cwd: string,
   sessionId: string,
-  record: Omit<SessionMessageRecord, "seq"> & { seq?: number },
+  record: Omit<SessionMessageRecord, "id"> & { id?: number },
 ): Promise<SessionMessageRecord> {
   const layout = createSessionLayout(cwd, sessionId);
   return withFileLock(layout.messagesPath, async () => {
     const fullRecord: SessionMessageRecord = {
       ...record,
-      seq: record.seq ?? await getNextSeq(layout.messagesPath),
+      id: record.id ?? await getNextId(layout.messagesPath),
     };
     await appendJsonl(layout.messagesPath, fullRecord);
     return fullRecord;
@@ -467,13 +474,13 @@ export async function appendSessionMessage(
 export async function appendSessionToolCall(
   cwd: string,
   sessionId: string,
-  record: Omit<SessionToolCallRecord, "seq"> & { seq?: number },
+  record: Omit<SessionToolCallRecord, "id"> & { id?: number },
 ): Promise<SessionToolCallRecord> {
   const layout = createSessionLayout(cwd, sessionId);
   return withFileLock(layout.toolCallsPath, async () => {
     const fullRecord: SessionToolCallRecord = {
       ...record,
-      seq: record.seq ?? await getNextSeq(layout.toolCallsPath),
+      id: record.id ?? await getNextId(layout.toolCallsPath),
     };
     await appendJsonl(layout.toolCallsPath, fullRecord);
     return fullRecord;
@@ -483,13 +490,13 @@ export async function appendSessionToolCall(
 export async function appendSessionFileCall(
   cwd: string,
   sessionId: string,
-  record: Omit<SessionFileCallRecord, "seq"> & { seq?: number },
+  record: Omit<SessionFileCallRecord, "id"> & { id?: number },
 ): Promise<SessionFileCallRecord> {
   const layout = createSessionLayout(cwd, sessionId);
   return withFileLock(layout.fileCallsPath, async () => {
     const fullRecord: SessionFileCallRecord = {
       ...record,
-      seq: record.seq ?? await getNextSeq(layout.fileCallsPath),
+      id: record.id ?? await getNextId(layout.fileCallsPath),
     };
     await appendJsonl(layout.fileCallsPath, fullRecord);
     return fullRecord;
@@ -499,13 +506,13 @@ export async function appendSessionFileCall(
 export async function appendSessionEvent(
   cwd: string,
   sessionId: string,
-  record: Omit<SessionEventRecord, "seq" | "createdAt"> & { seq?: number },
+  record: Omit<SessionEventRecord, "id" | "createdAt"> & { id?: number },
 ): Promise<SessionEventRecord> {
   const layout = createSessionLayout(cwd, sessionId);
   return withFileLock(layout.eventsPath, async () => {
     const fullRecord: SessionEventRecord = {
       ...record,
-      seq: record.seq ?? await getNextSeq(layout.eventsPath),
+      id: record.id ?? await getNextId(layout.eventsPath),
       createdAt: nowIso(),
     };
     await appendJsonl(layout.eventsPath, fullRecord);
@@ -513,7 +520,7 @@ export async function appendSessionEvent(
   });
 }
 
-export async function removeSessionMessagesBySeq(
+export async function removeSessionMessagesById(
   cwd: string,
   sessionId: string,
   seqs: number[],
@@ -525,11 +532,11 @@ export async function removeSessionMessagesBySeq(
   const seqSet = new Set(seqs);
   await withFileLock(layout.messagesPath, async () => {
     const records = await readJsonl<SessionMessageRecord>(layout.messagesPath);
-    await rewriteJsonlRecords(layout.messagesPath, records.filter(record => !seqSet.has(record.seq)));
+    await rewriteJsonlRecords(layout.messagesPath, records.filter(record => !seqSet.has(record.id)));
   });
 }
 
-export async function removeSessionFileCallsBySeq(
+export async function removeSessionFileCallsById(
   cwd: string,
   sessionId: string,
   seqs: number[],
@@ -541,7 +548,7 @@ export async function removeSessionFileCallsBySeq(
   const seqSet = new Set(seqs);
   await withFileLock(layout.fileCallsPath, async () => {
     const records = await readJsonl<SessionFileCallRecord>(layout.fileCallsPath);
-    await rewriteJsonlRecords(layout.fileCallsPath, records.filter(record => !seqSet.has(record.seq)));
+    await rewriteJsonlRecords(layout.fileCallsPath, records.filter(record => !seqSet.has(record.id)));
   });
 }
 
@@ -570,19 +577,19 @@ export async function listContextMounts(cwd: string, sessionId: string): Promise
 export async function mountContext(
   cwd: string,
   sessionId: string,
-  input: { sources?: ContextSource[]; seqRanges?: number[][]; metadata?: Record<string, unknown> },
+  input: { sources?: ContextSource[]; idRanges?: number[][]; metadata?: Record<string, unknown> },
 ): Promise<ContextMount> {
   await readSessionConfig(cwd, sessionId);
   const currentMounts = await listContextMounts(cwd, sessionId);
-  const seqRanges = normalizeRanges(input.seqRanges);
+  const idRanges = normalizeRanges(input.idRanges);
   const sources = input.sources?.length ? input.sources : undefined;
-  if (!sources?.length && seqRanges.length === 0) {
-    throw new Error("A context mount requires either sources or seqRanges");
+  if (!sources?.length && idRanges.length === 0) {
+    throw new Error("A context mount requires either sources or idRanges");
   }
   const mount: ContextMount = {
     id: currentMounts.reduce((max, item) => Math.max(max, item.id), 0) + 1,
     ...(sources ? { sources } : {}),
-    ...(seqRanges.length ? { seqRanges } : {}),
+    ...(idRanges.length ? { idRanges } : {}),
     ...(input.metadata ? { metadata: input.metadata } : {}),
   };
   await appendSessionEvent(cwd, sessionId, {
@@ -595,15 +602,15 @@ export async function mountContext(
 export async function unmountContext(
   cwd: string,
   sessionId: string,
-  input: { seqRanges?: number[][]; mountIds?: Array<string | number> },
-): Promise<{ removedIds: number[]; removedSeqs: number[] }> {
+  input: { idRanges?: number[][]; mountIds?: Array<string | number> },
+): Promise<{ removedIds: number[]; removedIds: number[] }> {
   await readSessionConfig(cwd, sessionId);
   const activeMounts = await listContextMounts(cwd, sessionId);
   const messages = await readMessages(cwd, sessionId);
   const currentState = await readCurrentContextState(cwd, sessionId);
-  const messagesBySeq = new Map(messages.map(message => [message.seq, message]));
+  const messagesById = new Map(messages.map(message => [message.id, message]));
   const childrenByParent = buildChildrenMap(messages);
-  const activeSeqSet = new Set(currentState.activeMessageSeqs);
+  const activeIdSet = new Set(currentState.activeMessageIds);
 
   const requestedIds = (input.mountIds ?? [])
     .map(value => Number(value))
@@ -611,45 +618,45 @@ export async function unmountContext(
   const activeMountMap = new Map(activeMounts.map(mount => [mount.id, mount]));
   const removedIds = requestedIds.filter(id => activeMountMap.has(id));
 
-  const seqRanges = normalizeRanges(input.seqRanges);
-  const removedSeqSet = new Set<number>();
+  const idRanges = normalizeRanges(input.idRanges);
+  const removedIdSet = new Set<number>();
 
-  if (seqRanges.length > 0) {
-    for (const seq of removeSeqsAndDescendants(activeSeqSet, seqRanges, messagesBySeq, childrenByParent)) {
-      removedSeqSet.add(seq);
+  if (idRanges.length > 0) {
+    for (const id of removeIdsAndDescendants(activeIdSet, idRanges, messagesById, childrenByParent)) {
+      removedIdSet.add(id);
     }
   }
 
   for (const mountId of removedIds) {
     const mount = activeMountMap.get(mountId);
-    if (!mount?.seqRanges?.length) {
+    if (!mount?.idRanges?.length) {
       continue;
     }
-    for (const seq of removeSeqsAndDescendants(activeSeqSet, mount.seqRanges, messagesBySeq, childrenByParent)) {
-      removedSeqSet.add(seq);
+    for (const id of removeIdsAndDescendants(activeIdSet, mount.idRanges, messagesById, childrenByParent)) {
+      removedIdSet.add(id);
     }
   }
 
-  if (removedIds.length > 0 || removedSeqSet.size > 0) {
+  if (removedIds.length > 0 || removedIdSet.size > 0) {
     await appendSessionEvent(cwd, sessionId, {
       type: "manual_unmount",
       payload: {
         ...(removedIds.length > 0 ? { removedMountIds: removedIds } : {}),
-        ...(removedSeqSet.size > 0 ? { seqRanges: toNumberRanges([...removedSeqSet]) } : {}),
+        ...(removedIdSet.size > 0 ? { idRanges: toNumberRanges([...removedIdSet]) } : {}),
       },
     });
   }
 
   return {
     removedIds,
-    removedSeqs: [...removedSeqSet].sort((a, b) => a - b),
+    removedIds: [...removedIdSet].sort((a, b) => a - b),
   };
 }
 
 export async function readLatestSendSnapshot(
   cwd: string,
   sessionId: string,
-): Promise<{ activeMessageSeqs: number[]; lastInputSeq?: number; lastParentSeq?: number; lastRequestKey?: string }> {
+): Promise<{ activeMessageIds: number[]; lastInputId?: number; lastParentId?: number; lastRequestKey?: string }> {
   const events = await readEvents(cwd, sessionId);
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]!;
@@ -657,30 +664,30 @@ export async function readLatestSendSnapshot(
       continue;
     }
     return {
-      activeMessageSeqs: fromNumberRanges(event.payload.activeMessageSeqRanges),
-      ...(Number.isInteger(Number(event.payload.inputSeq)) ? { lastInputSeq: Number(event.payload.inputSeq) } : {}),
-      ...(Number.isInteger(Number(event.payload.parentSeq)) ? { lastParentSeq: Number(event.payload.parentSeq) } : {}),
+      activeMessageIds: fromNumberRanges(event.payload.activeMessageIdRanges),
+      ...(Number.isInteger(Number(event.payload.inputId)) ? { lastInputId: Number(event.payload.inputId) } : {}),
+      ...(Number.isInteger(Number(event.payload.parentId)) ? { lastParentId: Number(event.payload.parentId) } : {}),
       ...(typeof event.requestKey === "string" ? { lastRequestKey: event.requestKey } : {}),
     };
   }
-  return { activeMessageSeqs: [] };
+  return { activeMessageIds: [] };
 }
 
 export async function readCurrentContextState(
   cwd: string,
   sessionId: string,
-): Promise<{ activeMessageSeqs: number[]; activeMounts: ContextMount[]; lastInputSeq?: number; lastParentSeq?: number }> {
+): Promise<{ activeMessageIds: number[]; activeMounts: ContextMount[]; lastInputId?: number; lastParentId?: number }> {
   const [messages, events, activeMounts] = await Promise.all([
     readMessages(cwd, sessionId),
     readEvents(cwd, sessionId),
     listContextMounts(cwd, sessionId),
   ]);
-  const messagesBySeq = new Map(messages.map(message => [message.seq, message]));
+  const messagesById = new Map(messages.map(message => [message.id, message]));
   const childrenByParent = buildChildrenMap(messages);
 
-  let activeSeqSet = new Set<number>();
-  let lastInputSeq: number | undefined;
-  let lastParentSeq: number | undefined;
+  let activeIdSet = new Set<number>();
+  let lastInputId: number | undefined;
+  let lastParentId: number | undefined;
   let lastSendIndex = -1;
 
   for (let index = events.length - 1; index >= 0; index -= 1) {
@@ -688,15 +695,14 @@ export async function readCurrentContextState(
     if (event.type !== "send_finished") {
       continue;
     }
-    activeSeqSet = new Set(
-      fromNumberRanges(event.payload.activeMessageSeqRanges)
-        .filter(seq => !isSystemPromptMessage(messagesBySeq.get(seq))),
+    activeIdSet = new Set(
+      fromNumberRanges(event.payload.activeMessageIdRanges),
     );
-    if (Number.isInteger(Number(event.payload.inputSeq))) {
-      lastInputSeq = Number(event.payload.inputSeq);
+    if (Number.isInteger(Number(event.payload.inputId))) {
+      lastInputId = Number(event.payload.inputId);
     }
-    if (Number.isInteger(Number(event.payload.parentSeq))) {
-      lastParentSeq = Number(event.payload.parentSeq);
+    if (Number.isInteger(Number(event.payload.parentId))) {
+      lastParentId = Number(event.payload.parentId);
     }
     lastSendIndex = index;
     break;
@@ -710,11 +716,10 @@ export async function readCurrentContextState(
       if (!mount) {
         continue;
       }
-      if (mount.seqRanges?.length) {
-        for (const seq of fromNumberRanges(mount.seqRanges)) {
-          const message = messagesBySeq.get(seq);
-          if (message && !isSystemPromptMessage(message)) {
-            activeSeqSet.add(seq);
+      if (mount.idRanges?.length) {
+        for (const id of fromNumberRanges(mount.idRanges)) {
+          if (messagesById.has(id)) {
+            activeIdSet.add(id);
           }
         }
         postSendSeqMounts.set(mount.id, mount);
@@ -723,9 +728,9 @@ export async function readCurrentContextState(
     }
 
     if (event.type === "manual_unmount") {
-      const eventRanges = normalizeRanges(event.payload.seqRanges);
+      const eventRanges = normalizeRanges(event.payload.idRanges);
       if (eventRanges.length > 0) {
-        removeSeqsAndDescendants(activeSeqSet, eventRanges, messagesBySeq, childrenByParent);
+        removeIdsAndDescendants(activeIdSet, eventRanges, messagesById, childrenByParent);
       }
       if (Array.isArray(event.payload.removedMountIds)) {
         for (const rawId of event.payload.removedMountIds) {
@@ -734,8 +739,8 @@ export async function readCurrentContextState(
             continue;
           }
           const mounted = postSendSeqMounts.get(mountId);
-          if (mounted?.seqRanges?.length) {
-            removeSeqsAndDescendants(activeSeqSet, mounted.seqRanges, messagesBySeq, childrenByParent);
+          if (mounted?.idRanges?.length) {
+            removeIdsAndDescendants(activeIdSet, mounted.idRanges, messagesById, childrenByParent);
           }
           postSendSeqMounts.delete(mountId);
         }
@@ -744,25 +749,25 @@ export async function readCurrentContextState(
   }
 
   return {
-    activeMessageSeqs: [...activeSeqSet].sort((a, b) => a - b),
+    activeMessageIds: [...activeIdSet].sort((a, b) => a - b),
     activeMounts,
-    ...(lastInputSeq !== undefined ? { lastInputSeq } : {}),
-    ...(lastParentSeq !== undefined ? { lastParentSeq } : {}),
+    ...(lastInputId !== undefined ? { lastInputId } : {}),
+    ...(lastParentId !== undefined ? { lastParentId } : {}),
   };
 }
 
 export async function getCurrentParentSequence(cwd: string, sessionId: string): Promise<number | undefined> {
   const state = await readCurrentContextState(cwd, sessionId);
-  if (state.activeMessageSeqs.length === 0) {
+  if (state.activeMessageIds.length === 0) {
     return undefined;
   }
-  return state.activeMessageSeqs[state.activeMessageSeqs.length - 1];
+  return state.activeMessageIds[state.activeMessageIds.length - 1];
 }
 
-export function compressMessageSequences(seqs: number[]): number[][] {
+export function compressMessageRanges(seqs: number[]): number[][] {
   return toNumberRanges(seqs);
 }
 
-export function expandMessageSequenceRanges(ranges: unknown): number[] {
+export function expandMessageIdRanges(ranges: unknown): number[] {
   return fromNumberRanges(ranges);
 }

@@ -7,11 +7,9 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { buildSubagentPrompt } from "../core/pi-config.ts";
 import {
-  composeSubagentTurnId,
   normalizeToolNames,
   type SubagentModelSelection,
   type SubagentRunRequest,
-  type SubagentTurnIdentity,
 } from "../core/subagent-run.ts";
 import type { SessionSdkMode, StandaloneSdkOptions } from "../core/session-store.ts";
 
@@ -91,7 +89,7 @@ export interface PiModelSummary {
 }
 
 export interface PiSdkRunOptions extends SubagentRunRequest {
-  turnIdentity: SubagentTurnIdentity;
+  runId: string;
   agentDir?: string;
   authStorage?: AuthStorage;
   piSdkModule?: unknown;
@@ -107,7 +105,6 @@ export interface PiSdkRunOptions extends SubagentRunRequest {
 
 export interface PiSdkRunResult {
   runId: string;
-  turnId: string;
   model: PiModelSummary;
   tools: string[];
   prompt: string;
@@ -258,7 +255,6 @@ export async function runSubagentWithPiSdk(options: PiSdkRunOptions): Promise<Pi
   const { createAgentSession, SessionManager } = pi;
   const model = resolvePiModel(runtimeModelRegistry, runtimeCurrentModel, options.modelSelection);
   const tools = normalizeToolNames(options.tools);
-  const turnId = composeSubagentTurnId(options.turnIdentity);
   const promptInput = {
     context: options.context ?? "",
     task: options.inputText,
@@ -305,7 +301,6 @@ export async function runSubagentWithPiSdk(options: PiSdkRunOptions): Promise<Pi
       void options.onEvent?.({
         type: "tool_call_started",
         payload: {
-          turnId,
           toolCallId: event.toolCallId,
           toolName: event.toolName,
           params: event.args ?? {},
@@ -319,12 +314,11 @@ export async function runSubagentWithPiSdk(options: PiSdkRunOptions): Promise<Pi
         toolName: event.toolName,
         args: {},
       });
-      finishedToolCalls.push(finalizeToolTrace(existing, event, `${turnId}:reply`));
+      finishedToolCalls.push(finalizeToolTrace(existing, event, `${options.runId}:reply`));
       pendingToolCalls.delete(event.toolCallId);
       void options.onEvent?.({
         type: "tool_call_finished",
         payload: {
-          turnId,
           toolCallId: event.toolCallId,
           toolName: event.toolName,
           result: event.result ?? null,
@@ -342,8 +336,7 @@ export async function runSubagentWithPiSdk(options: PiSdkRunOptions): Promise<Pi
   }
 
   return {
-    runId: options.turnIdentity.runId,
-    turnId,
+    runId: options.runId,
     model: toModelSummary(model, true),
     tools,
     prompt,

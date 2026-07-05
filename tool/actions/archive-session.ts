@@ -23,13 +23,13 @@ export async function handleArchiveSession(
   try {
     for (const message of params.messages ?? []) {
       await appendSessionMessage(ctx.cwd, params.sessionId, {
-        ...(message.seq !== undefined ? { seq: message.seq } : {}),
+        ...(message.id !== undefined ? { id: message.id } : {}),
         kind: message.kind as SessionMessageRecord["kind"],
-        ...(message.parentSeq !== undefined ? { parentSeq: message.parentSeq } : {}),
+        ...(message.parentId !== undefined ? { parentId: message.parentId } : {}),
         ...(message.requestKey ? { requestKey: message.requestKey } : {}),
         ...(message.text !== undefined ? { text: message.text } : {}),
-        ...(message.toolCallSeq !== undefined ? { toolCallSeq: message.toolCallSeq } : {}),
-        ...(message.fileCallSeq !== undefined ? { fileCallSeq: message.fileCallSeq } : {}),
+        ...(message.toolCallId !== undefined ? { toolCallId: message.toolCallId } : {}),
+        ...(message.fileCallId !== undefined ? { fileCallId: message.fileCallId } : {}),
         ...(message.tags ? { tags: message.tags } : {}),
         ...(message.handoff ? { handoff: message.handoff } : {}),
         ...(message.metadata ? { metadata: message.metadata } : {}),
@@ -38,7 +38,7 @@ export async function handleArchiveSession(
 
     for (const toolCall of params.toolCalls ?? []) {
       await appendSessionToolCall(ctx.cwd, params.sessionId, {
-        ...(toolCall.seq !== undefined ? { seq: toolCall.seq } : {}),
+        ...(toolCall.id !== undefined ? { id: toolCall.id } : {}),
         ...(toolCall.requestKey ? { requestKey: toolCall.requestKey } : {}),
         toolName: toolCall.toolName,
         params: toolCall.params ?? {},
@@ -50,7 +50,7 @@ export async function handleArchiveSession(
 
     for (const fileCall of params.fileCalls ?? []) {
       await appendSessionFileCall(ctx.cwd, params.sessionId, {
-        ...(fileCall.seq !== undefined ? { seq: fileCall.seq } : {}),
+        ...(fileCall.id !== undefined ? { id: fileCall.id } : {}),
         filePath: fileCall.filePath,
         ...(fileCall.requestKey ? { requestKey: fileCall.requestKey } : {}),
         ...(fileCall.metadata ? { metadata: fileCall.metadata } : {}),
