@@ -247,6 +247,66 @@ prompt 或工具变更后对比行为差异。
 
 ---
 
+## 架构重构：合并 tool-calls.jsonl + file-calls.jsonl → messages.jsonl ★★★ $$$
+
+### 动机
+
+当前 5 个 session 文件中，`tool-calls.jsonl` 和 `file-calls.jsonl` 存储的数据与 `messages.jsonl` 高度重叠。一条 tool call 产生后在 **4 个地方** 有记录：
+
+```
+messages.jsonl    → { kind:"tool_call", toolCallId:5 }         ← 空壳指针
+tool-calls.jsonl  → { id:5, toolName, params, result }        ← 实际数据
+messages.jsonl    → { kind:"file_call", fileCallId:3 }        ← 空壳指针
+file-calls.jsonl  → { id:3, filePath }                        ← 实际数据
+events.jsonl      → { type:"tool_send_started", toolCallId:5 } ← 又是指针
+```
+
+`tool_call` 和 `file_call` 消息本身**不含任何内容**，纯粹是为了维护 parentId 链。上下文重建需要跨 3 个文件 join（`buildSessionHistoryContext`）。
+
+### 方案
+
+将 tool 和 file 数据**内联到 messages 中**。messages.jsonl 成为完整的、自包含的会话记录。events.jsonl 保持为轻量事件索引（工具事件引用 messageId 替代 toolCallId）。
+
+最终 session 文件从 **5 个简化为 3 个**：`messages.jsonl` + `events.jsonl` + `system-config.json`。
+
+### 新消息格式
+
+```json
+// tool_call — 全量内联
+{ "kind":"tool_call", "parentId":9, "toolName":"read",
+  "toolParams": {"path":"/foo"}, "toolResult":"content...", "toolError":false }
+
+// file_call — 全量内联
+{ "kind":"file_call", "parentId":10, "filePath":"/path/to/file" }
+```
+
+移除 `toolCallId` / `fileCallId` 外键。
+
+### 影响范围（预估 19 个文件）
+
+| 分类 | 文件 | 变更 |
+|------|------|------|
+| 核心类型 | `core/session-store.ts` | 删除 `SessionToolCallRecord`/`SessionFileCallRecord`；修改 `SessionMessageRecord` 加内联字段；删除 `appendSessionToolCall`/`appendSessionFileCall`/`readToolCalls`/`readFileCalls`；移除 `toolCallsPath`/`fileCallsPath` |
+| 执行引擎 | `core/session-runtime.ts` | 工具数据直接写入消息；`buildSessionHistoryContext` 不再跨文件 join；事件 payload 改用 messageId |
+| 上下文源 | `core/context-sources.ts` | `expandReferences` 改为读取消息内联字段 |
+| 归档 | `tool/actions/archive-session.ts` | 移除 toolCalls/fileCalls 参数 |
+| 入口 | `tool/block-agent-core.ts` | 移除 toolCalls/fileCalls schema 参数 |
+| 导出 | `index.ts` | 移除相关导出 |
+| 测试 | `session-store.test.ts`、`block-agent-core.test.ts`、`context-sources.test.ts` | 适配新模型 |
+| 场景 | scenario-2/3/4/5/6 | 读取方式从 `readJsonl("tool-calls.jsonl")` 改为从 messages 过滤 |
+| 文档 | README, user-manual, SKILL.md | 更新文件列表 |
+
+### 不在此范围
+
+- `core/types.ts` / `core/file-refs.ts` / `core/save-turn.ts` — legacy CRUD 子系统，独立的 toolCallId 字段，不在此次合并范围
+- `core/archive-store.ts` — 独立存档子系统（`.block-agent-core/runs/`），暂不合并
+
+### 策略
+
+一次性完成，不保留向后兼容（旧 session 数据格式不兼容，但这是内部项目，无外部消费者）。
+
+---
+
 ## 建议实施节奏
 
 | 阶段 | 内容 | 时间 |
