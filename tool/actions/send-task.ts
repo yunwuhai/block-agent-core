@@ -2,10 +2,10 @@ import {
   allocateTurnId,
   appendSessionEvent,
   compressMessageRanges,
-  nowIso,
   readCurrentContextState,
   readSessionConfig,
 } from "../../core/session-store.ts";
+import { nowIso } from "../../utils/datetime.ts";
 import {
   createInputMessage,
   executeSessionTask,

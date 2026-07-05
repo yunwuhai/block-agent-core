@@ -3,6 +3,9 @@ import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ContextSource } from "./context-sources.ts";
 import { appendJsonl, readJsonl } from "../utils/jsonl.ts";
+import { nowIso } from "../utils/datetime.ts";
+import { toNumberRanges, fromNumberRanges, normalizeRanges } from "../utils/range-utils.ts";
+import { buildChildrenMap, removeIdsAndDescendants } from "./message-tree.ts";
 import type { SubagentModelSelection, SubagentToolSelection } from "./subagent-run.ts";
 
 const fileLocks = new Map<string, Promise<void>>();
@@ -98,14 +101,6 @@ export interface CreateSessionInput {
   sdkOptions?: StandaloneSdkOptions;
 }
 
-export function nowIso(): string {
-  const d = new Date();
-  const offset = -d.getTimezoneOffset();
-  const sign = offset >= 0 ? "+" : "-";
-  const pad = (n: number, len = 2) => String(n).padStart(len, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}${sign}${pad(Math.floor(Math.abs(offset) / 60))}:${pad(Math.abs(offset) % 60)}`;
-}
-
 async function withFileLock<T>(filePath: string, task: () => Promise<T>): Promise<T> {
   const previous = fileLocks.get(filePath) ?? Promise.resolve();
   let release!: () => void;
@@ -122,104 +117,6 @@ async function withFileLock<T>(filePath: string, task: () => Promise<T>): Promis
       fileLocks.delete(filePath);
     }
   }
-}
-
-function toNumberRanges(numbers: number[]): number[][] {
-  if (numbers.length === 0) {
-    return [];
-  }
-  const sorted = [...new Set(numbers)].sort((a, b) => a - b);
-  const ranges: number[][] = [];
-  let start = sorted[0]!;
-  let previous = start;
-  for (let index = 1; index < sorted.length; index += 1) {
-    const current = sorted[index]!;
-    if (current === previous + 1) {
-      previous = current;
-      continue;
-    }
-    ranges.push([start, previous]);
-    start = current;
-    previous = current;
-  }
-  ranges.push([start, previous]);
-  return ranges;
-}
-
-function fromNumberRanges(ranges: unknown): number[] {
-  if (!Array.isArray(ranges)) {
-    return [];
-  }
-  const values: number[] = [];
-  for (const item of ranges) {
-    if (!Array.isArray(item) || item.length < 2) {
-      continue;
-    }
-    const start = Number(item[0]);
-    const end = Number(item[1]);
-    if (!Number.isInteger(start) || !Number.isInteger(end) || start > end) {
-      continue;
-    }
-    for (let current = start; current <= end; current += 1) {
-      values.push(current);
-    }
-  }
-  return values;
-}
-
-function normalizeRanges(ranges: unknown): number[][] {
-  return toNumberRanges(fromNumberRanges(ranges));
-}
-
-function buildChildrenMap(messages: SessionMessageRecord[]): Map<number, number[]> {
-  const map = new Map<number, number[]>();
-  for (const message of messages) {
-    const parentId = message.parentId;
-    if (typeof parentId !== "number" || !Number.isInteger(parentId)) {
-      continue;
-    }
-    const children = map.get(parentId) ?? [];
-    children.push(message.id);
-    map.set(parentId, children);
-  }
-  return map;
-}
-
-function collectDescendantIds(
-  startingIds: number[],
-  activeIds: Set<number>,
-  childrenByParent: Map<number, number[]>,
-): number[] {
-  const seen = new Set<number>();
-  const queue = [...startingIds];
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-    if (seen.has(current) || !activeIds.has(current)) {
-      continue;
-    }
-    seen.add(current);
-    for (const child of childrenByParent.get(current) ?? []) {
-      if (activeIds.has(child) && !seen.has(child)) {
-        queue.push(child);
-      }
-    }
-  }
-  return [...seen].sort((a, b) => a - b);
-}
-
-function removeIdsAndDescendants(
-  activeIds: Set<number>,
-  idRanges: number[][],
-  messagesById: Map<number, SessionMessageRecord>,
-  childrenByParent: Map<number, number[]>,
-): number[] {
-  const seedIds = fromNumberRanges(idRanges)
-    .filter(id => activeIds.has(id));
-  const removedIds = collectDescendantIds(seedIds, activeIds, childrenByParent);
-  for (const id of removedIds) {
-    activeIds.delete(id);
-  }
-  return removedIds;
 }
 
 async function readLegacySystemConfig(layout: SessionLayout): Promise<SessionSystemConfig | undefined> {
@@ -646,7 +543,7 @@ export async function unmountContext(
   const removedIdSet = new Set<number>();
 
   if (idRanges.length > 0) {
-    for (const id of removeIdsAndDescendants(activeIdSet, idRanges, messagesById, childrenByParent)) {
+    for (const id of removeIdsAndDescendants(activeIdSet, idRanges, childrenByParent)) {
       removedIdSet.add(id);
     }
   }
@@ -656,7 +553,7 @@ export async function unmountContext(
     if (!mount?.idRanges?.length) {
       continue;
     }
-    for (const id of removeIdsAndDescendants(activeIdSet, mount.idRanges, messagesById, childrenByParent)) {
+    for (const id of removeIdsAndDescendants(activeIdSet, mount.idRanges, childrenByParent)) {
       removedIdSet.add(id);
     }
   }
@@ -754,7 +651,7 @@ export async function readCurrentContextState(
     if (event.type === "manual_unmount") {
       const eventRanges = normalizeRanges(event.payload.idRanges);
       if (eventRanges.length > 0) {
-        removeIdsAndDescendants(activeIdSet, eventRanges, messagesById, childrenByParent);
+        removeIdsAndDescendants(activeIdSet, eventRanges, childrenByParent);
       }
       if (Array.isArray(event.payload.removedMountIds)) {
         for (const rawId of event.payload.removedMountIds) {
@@ -764,7 +661,7 @@ export async function readCurrentContextState(
           }
           const mounted = postSendSeqMounts.get(mountId);
           if (mounted?.idRanges?.length) {
-            removeIdsAndDescendants(activeIdSet, mounted.idRanges, messagesById, childrenByParent);
+            removeIdsAndDescendants(activeIdSet, mounted.idRanges, childrenByParent);
           }
           postSendSeqMounts.delete(mountId);
         }

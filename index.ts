@@ -14,6 +14,9 @@ export default async function (pi: import("@earendil-works/pi-coding-agent").Ext
 }
 
 // Named exports: reusable core API
+export { nowIso } from "./utils/datetime.ts";
+export { toNumberRanges, fromNumberRanges, normalizeRanges } from "./utils/range-utils.ts";
+export { buildChildrenMap, collectDescendantIds, removeIdsAndDescendants } from "./core/message-tree.ts";
 export { appendTurn, getTurn, queryTurns, updateTurn, listTurns, findRecentTurns } from "./core/turns.ts";
 export { appendToolCall, getToolCall, queryToolCalls, updateToolCall } from "./core/tool-calls.ts";
 export { appendTemplate, getTemplate, queryTemplates, updateTemplate } from "./core/templates.ts";
