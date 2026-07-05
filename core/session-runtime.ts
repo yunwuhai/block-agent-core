@@ -1,18 +1,13 @@
 import {
   appendSessionEvent,
-  appendSessionFileCall,
   appendSessionMessage,
-  appendSessionToolCall,
   compressMessageRanges,
   getCurrentParentSequence,
   listContextMounts,
   removeSessionMessagesById,
   readCurrentContextState,
-  readFileCalls,
   readMessages,
   readSessionConfig,
-  readToolCalls,
-  type SessionFileCallRecord,
   type SessionMessageRecord,
 } from "./session-store.ts";
 import { composeContext, type ContextSource } from "./context-sources.ts";
@@ -65,35 +60,30 @@ function inferFilePath(params: unknown): string | undefined {
   return typeof candidate === "string" ? candidate : undefined;
 }
 
-function formatToolCallMessage(record: { toolName: string; params: unknown; result: unknown; error?: boolean }): string {
+function formatToolCallMessage(toolName: string, params: unknown, result: unknown, error?: boolean): string {
   return [
-    `Tool: ${record.toolName}`,
-    `Params: ${JSON.stringify(record.params, null, 2)}`,
-    `Error: ${record.error ? "true" : "false"}`,
-    `Result: ${JSON.stringify(record.result, null, 2)}`,
+    `Tool: ${toolName}`,
+    `Params: ${JSON.stringify(params, null, 2)}`,
+    `Error: ${error ? "true" : "false"}`,
+    `Result: ${JSON.stringify(result, null, 2)}`,
   ].join("\n");
 }
 
-function formatFileCallMessage(record: SessionFileCallRecord): string {
-  return `File: ${record.filePath}`;
+function formatFileCallMessage(filePath: string): string {
+  return `File: ${filePath}`;
 }
 
-function resolveExpandedMessageText(
-  message: SessionMessageRecord,
-  toolCallsById: Map<number, { toolName: string; params: unknown; result: unknown; error?: boolean }>,
-  fileCallsById: Map<number, SessionFileCallRecord>,
-): string {
-  if (message.kind === "tool_call" && typeof message.toolCallId === "number") {
-    const toolCall = toolCallsById.get(message.toolCallSeq);
-    if (toolCall) {
-      return formatToolCallMessage(toolCall);
-    }
+function resolveExpandedMessageText(message: SessionMessageRecord): string {
+  if (message.kind === "tool_call" && message.toolName) {
+    return formatToolCallMessage(
+      message.toolName,
+      message.toolParams ?? {},
+      message.toolResult ?? null,
+      message.toolError,
+    );
   }
-  if (message.kind === "file_call" && typeof message.fileCallId === "number") {
-    const fileCall = fileCallsById.get(message.fileCallSeq);
-    if (fileCall) {
-      return formatFileCallMessage(fileCall);
-    }
+  if (message.kind === "file_call" && message.filePath) {
+    return formatFileCallMessage(message.filePath);
   }
   return message.text ?? "";
 }
@@ -103,18 +93,12 @@ async function buildSessionHistoryContext(cwd: string, sessionId: string): Promi
   if (state.activeMessageIds.length === 0) {
     return { text: "", activeMessageIds: [] };
   }
-  const [messages, toolCalls, fileCalls] = await Promise.all([
-    readMessages(cwd, sessionId),
-    readToolCalls(cwd, sessionId),
-    readFileCalls(cwd, sessionId),
-  ]);
+  const messages = await readMessages(cwd, sessionId);
   const activeSet = new Set(state.activeMessageIds);
-  const toolCallsById = new Map(toolCalls.map(record => [record.id, record]));
-  const fileCallsById = new Map(fileCalls.map(record => [record.id, record]));
   const text = messages
     .filter(message => activeSet.has(message.id))
     .sort((a, b) => a.id - b.id)
-    .map(message => resolveExpandedMessageText(message, toolCallsById, fileCallsById))
+    .map(message => resolveExpandedMessageText(message))
     .filter(part => part.trim().length > 0)
     .join("\n\n");
   return { text, activeMessageIds: state.activeMessageIds };
@@ -230,64 +214,54 @@ export async function executeSessionTask(
   outputMessageIds.push(reasoningMessage.id);
   currentParentId = reasoningMessage.id;
 
-  const sdkToLocalId = new Map<string, number>();
+  const sdkToMessageId = new Map<string, number>();
 
   for (const trace of result.toolCalls) {
-    const toolCallRecord = await appendSessionToolCall(cwd, sessionId, {
-      toolName: trace.toolName,
-      params: trace.params,
-      result: trace.result,
-      error: Boolean(trace.metadata?.isError),
-      turnId: request.turnId,
-      ...(trace.metadata ? { metadata: trace.metadata } : {}),
-    });
-
-    sdkToLocalId.set(trace.id, toolCallRecord.id);
-
     const toolCallMessage = await appendSessionMessage(cwd, sessionId, {
       kind: "tool_call",
       parentId: currentParentId,
       turnId: request.turnId,
-      toolCallId: toolCallRecord.id,
+      toolName: trace.toolName,
+      toolParams: trace.params,
+      toolResult: trace.result,
+      toolError: Boolean(trace.metadata?.isError),
+      ...(trace.metadata ? { metadata: trace.metadata } : {}),
     });
+    sdkToMessageId.set(trace.id, toolCallMessage.id);
     outputMessageIds.push(toolCallMessage.id);
     currentParentId = toolCallMessage.id;
 
     const filePath = inferFilePath(trace.params);
     if (filePath && isFileAccessTool(trace.toolName)) {
-      const fileCallRecord = await appendSessionFileCall(cwd, sessionId, {
-        filePath,
-        turnId: request.turnId,
-      });
       const fileCallMessage = await appendSessionMessage(cwd, sessionId, {
         kind: "file_call",
         parentId: currentParentId,
         turnId: request.turnId,
-        fileCallId: fileCallRecord.id,
+        filePath,
       });
       outputMessageIds.push(fileCallMessage.id);
       currentParentId = fileCallMessage.id;
     }
   }
 
-  // Write deferred tool events with only local tool call ids
+  // Write deferred tool events referencing messageId instead of toolCallId
   for (const [sdkId, _startedPayload] of pendingStarted) {
-    const localId = sdkToLocalId.get(sdkId);
-    if (localId !== undefined) {
+    const messageId = sdkToMessageId.get(sdkId);
+    if (messageId !== undefined) {
       await appendSessionEvent(cwd, sessionId, {
         turnId: request.turnId,
         type: "tool_send_started",
-        payload: { toolCallId: localId },
+        payload: { messageId },
       });
     }
   }
   for (const [sdkId, _finishedPayload] of pendingFinished) {
-    const localId = sdkToLocalId.get(sdkId);
-    if (localId !== undefined) {
+    const messageId = sdkToMessageId.get(sdkId);
+    if (messageId !== undefined) {
       await appendSessionEvent(cwd, sessionId, {
         turnId: request.turnId,
         type: "tool_send_finished",
-        payload: { toolCallId: localId },
+        payload: { messageId },
       });
     }
   }

@@ -63,8 +63,6 @@ You can filter by:
 
 ## Storage model
 
-- `messages.jsonl` is the only context mainline
-- `tool-calls.jsonl` stores merged tool call/result records
-- `file-calls.jsonl` stores referenced file paths
+- `messages.jsonl` is the only context mainline (tool and file data inlined)
 - `events.jsonl` stores compact audit events
 - `system-config.json` stores fixed prompts and default PI settings

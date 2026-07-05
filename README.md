@@ -5,8 +5,7 @@
 It centers on:
 
 - persistent `session`s
-- `messages.jsonl` as the only context mainline
-- `tool-calls.jsonl` / `file-calls.jsonl` as referenced side records
+- `messages.jsonl` as the only context mainline (tool and file data inlined)
 - `events.jsonl` as a lightweight audit log
 - `seq`-driven history mount / unmount
 
@@ -37,8 +36,6 @@ Supported actions:
 Each session stores:
 
 - `messages.jsonl`
-- `tool-calls.jsonl`
-- `file-calls.jsonl`
 - `events.jsonl`
 - `system-config.json`
 
@@ -52,7 +49,8 @@ Message kinds:
 
 Notes:
 
-- `tool_call` messages expand both tool params and tool results
+- `tool_call` messages carry tool name, params, result, and error inline
+- `file_call` messages carry the referenced file path inline
 - system prompt is stored in `system-config.json` and passed to the PI SDK at send time
 - active history is tracked by `seq` ranges, not by round/task tables
 

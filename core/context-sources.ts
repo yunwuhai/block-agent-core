@@ -1,5 +1,4 @@
 import { readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
 import { readJsonl } from "../utils/jsonl.ts";
 
 export interface JsonlFieldsSource {
@@ -15,8 +14,6 @@ export interface JsonlFieldsSource {
   recordSeparator?: string;
   valueSeparator?: string;
   expandReferences?: boolean;
-  toolCallsPath?: string;
-  fileCallsPath?: string;
 }
 
 export interface FileSliceSource {
@@ -104,33 +101,18 @@ export async function loadJsonlFieldsSource(source: JsonlFieldsSource): Promise<
   const valueSeparator = source.valueSeparator ?? "\n";
   const recordSeparator = source.recordSeparator ?? "\n\n";
 
-  let toolCallRecords: Record<string, unknown>[] | undefined;
-  let fileCallRecords: Record<string, unknown>[] | undefined;
-  if (source.expandReferences) {
-    toolCallRecords = await readJsonl<Record<string, unknown>>(source.toolCallsPath ?? join(dirname(source.filePath), "tool-calls.jsonl"));
-    fileCallRecords = await readJsonl<Record<string, unknown>>(source.fileCallsPath ?? join(dirname(source.filePath), "file-calls.jsonl"));
-  }
-
   function expandRecord(record: Record<string, unknown>): string {
     const kind = typeof record.kind === "string" ? record.kind : undefined;
-    if (kind === "tool_call" && Number.isInteger(Number(record.toolCallId))) {
-      const lookupId = Number(record.toolCallId);
-      const toolCall = toolCallRecords?.find(item => Number(item.id ?? -1) === lookupId);
-      if (!toolCall) return "";
+    if (kind === "tool_call" && typeof record.toolName === "string") {
       return [
-        `Tool: ${String(toolCall.toolName ?? "")}`,
-        `Params: ${JSON.stringify(toolCall.params ?? {}, null, 2)}`,
-        `Error: ${Boolean(toolCall.error)}`,
-        `Result: ${JSON.stringify(toolCall.result ?? null, null, 2)}`,
+        `Tool: ${record.toolName}`,
+        `Params: ${JSON.stringify(record.toolParams ?? {}, null, 2)}`,
+        `Error: ${Boolean(record.toolError)}`,
+        `Result: ${JSON.stringify(record.toolResult ?? null, null, 2)}`,
       ].join("\n");
     }
-    if (kind === "file_call" && Number.isInteger(Number(record.fileCallId))) {
-      const lookupId = Number(record.fileCallId);
-      const fileCall = fileCallRecords?.find(item => Number(item.id ?? -1) === lookupId);
-      if (!fileCall) return "";
-      return [
-        `File: ${String(fileCall.filePath ?? "")}`,
-      ].join("\n");
+    if (kind === "file_call" && typeof record.filePath === "string") {
+      return `File: ${record.filePath}`;
     }
     return "";
   }

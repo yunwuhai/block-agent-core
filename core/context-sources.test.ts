@@ -53,13 +53,9 @@ describe("context sources", () => {
   it("expands message references into tool and file call payloads", async () => {
     const dir = join(tmpDir, "expanded");
     const messagesPath = join(dir, "messages.jsonl");
-    const toolCallsPath = join(dir, "tool-calls.jsonl");
-    const fileCallsPath = join(dir, "file-calls.jsonl");
 
-    await appendJsonl(messagesPath, { id: 1, kind: "tool_call", toolCallId: 1 });
-    await appendJsonl(messagesPath, { id: 2, kind: "file_call", fileCallId: 1 });
-    await appendJsonl(toolCallsPath, { id: 1, toolName: "read", params: { path: "/tmp/a.ts" }, result: { ok: true } });
-    await appendJsonl(fileCallsPath, { id: 1, filePath: "/tmp/a.ts" });
+    await appendJsonl(messagesPath, { id: 1, kind: "tool_call", toolName: "read", toolParams: { path: "/tmp/a.ts" }, toolResult: { ok: true } });
+    await appendJsonl(messagesPath, { id: 2, kind: "file_call", filePath: "/tmp/a.ts" });
 
     const content = await loadContextSource({
       type: "jsonl-fields",

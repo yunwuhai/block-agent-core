@@ -84,8 +84,6 @@ describe("session-first actions", () => {
     const sessionDir = join(tmpDir, ".block-agent-core", "sessions", "session-a");
     expect(readFileSync(join(sessionDir, "system-config.json"), "utf-8")).toContain("\"sdkMode\": \"host-inherit\"");
     expect(readFileSync(join(sessionDir, "messages.jsonl"), "utf-8")).toBe("");
-    expect(readFileSync(join(sessionDir, "tool-calls.jsonl"), "utf-8")).toBe("");
-    expect(readFileSync(join(sessionDir, "file-calls.jsonl"), "utf-8")).toBe("");
     expect(readFileSync(join(sessionDir, "events.jsonl"), "utf-8")).toContain("session_initialized");
   });
 
@@ -191,16 +189,16 @@ describe("session-first actions", () => {
     expect(eventsResult.content[0]!.text).toContain("send_finished");
 
     const sessionDir = join(tmpDir, ".block-agent-core", "sessions", "session-b");
-    const messages = await readJsonl<{ kind: string; text?: string }>(join(sessionDir, "messages.jsonl"));
+    const messages = await readJsonl<{ kind: string; text?: string; toolName?: string; filePath?: string }>(join(sessionDir, "messages.jsonl"));
     expect(messages.map(item => item.kind)).toEqual(["input", "reasoning", "tool_call", "file_call", "reply"]);
     const systemConfig = JSON.parse(readFileSync(join(sessionDir, "system-config.json"), "utf-8"));
     expect(systemConfig.systemPromptText).toContain("You are a coding session.");
     expect(systemConfig.systemPromptFilePaths).toEqual([promptPath]);
 
-    const toolCalls = await readJsonl<{ toolName: string }>(join(sessionDir, "tool-calls.jsonl"));
-    expect(toolCalls[0]!.toolName).toBe("read");
-    const fileCalls = await readJsonl<{ filePath: string }>(join(sessionDir, "file-calls.jsonl"));
-    expect(fileCalls.some(item => item.filePath === notePath)).toBe(true);
+    const toolCallMsg = messages.find(m => m.kind === "tool_call");
+    expect(toolCallMsg!.toolName).toBe("read");
+    const fileCallMsg = messages.find(m => m.kind === "file_call");
+    expect(fileCallMsg!.filePath).toBe(notePath);
   });
 
   it("supports seq-range unmount and remount", async () => {
@@ -271,9 +269,7 @@ describe("session-first actions", () => {
 
     const sessionDir = join(tmpDir, ".block-agent-core", "sessions", "session-fail-retry");
     const messagesAfterFirstFail = await readJsonl<{ id: number; kind: string }>(join(sessionDir, "messages.jsonl"));
-    const fileCallsAfterFirstFail = await readJsonl<{ id: number; filePath: string }>(join(sessionDir, "file-calls.jsonl"));
     expect(messagesAfterFirstFail).toEqual([]);
-    expect(fileCallsAfterFirstFail).toEqual([]);
 
     const send2Response = await handleSendMessage({
       sessionId: "session-fail-retry",
@@ -283,9 +279,7 @@ describe("session-first actions", () => {
     await waitForSendFinish("session-fail-retry", send2TurnId);
 
     const messagesAfterSecondFail = await readJsonl<{ id: number; kind: string }>(join(sessionDir, "messages.jsonl"));
-    const fileCallsAfterSecondFail = await readJsonl<{ id: number; filePath: string }>(join(sessionDir, "file-calls.jsonl"));
     expect(messagesAfterSecondFail).toEqual([]);
-    expect(fileCallsAfterSecondFail).toEqual([]);
 
     const mountsState = JSON.parse((await handleListContextMounts({
       sessionId: "session-fail-retry",

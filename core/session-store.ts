@@ -51,27 +51,15 @@ export interface SessionMessageRecord {
   kind: SessionMessageKind;
   text?: string;
   parentId?: number;
-  toolCallId?: number;
-  fileCallId?: number;
+  // inline tool call data (kind === "tool_call")
+  toolName?: string;
+  toolParams?: unknown;
+  toolResult?: unknown;
+  toolError?: boolean;
+  // inline file path (kind === "file_call")
+  filePath?: string;
   tags?: string[];
   handoff?: string;
-  metadata?: Record<string, unknown>;
-}
-
-export interface SessionToolCallRecord {
-  turnId?: number;
-  id: number;
-  toolName: string;
-  params: unknown;
-  result: unknown;
-  error?: boolean;
-  metadata?: Record<string, unknown>;
-}
-
-export interface SessionFileCallRecord {
-  turnId?: number;
-  id: number;
-  filePath: string;
   metadata?: Record<string, unknown>;
 }
 
@@ -86,8 +74,6 @@ export interface SessionEventRecord {
 export interface SessionLayout {
   rootDir: string;
   messagesPath: string;
-  toolCallsPath: string;
-  fileCallsPath: string;
   systemConfigPath: string;
   eventsPath: string;
 }
@@ -151,8 +137,6 @@ export function createSessionLayout(cwd: string, sessionId: string): SessionLayo
   return {
     rootDir,
     messagesPath: join(rootDir, "messages.jsonl"),
-    toolCallsPath: join(rootDir, "tool-calls.jsonl"),
-    fileCallsPath: join(rootDir, "file-calls.jsonl"),
     systemConfigPath: join(rootDir, "system-config.json"),
     eventsPath: join(rootDir, "events.jsonl"),
   };
@@ -245,8 +229,6 @@ export async function createSession(
   await mkdir(layout.rootDir, { recursive: true });
   await writeFile(layout.systemConfigPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
   await ensureParentFile(layout.messagesPath, "");
-  await ensureParentFile(layout.toolCallsPath, "");
-  await ensureParentFile(layout.fileCallsPath, "");
   await ensureParentFile(layout.eventsPath, "");
 
   await appendSessionEvent(cwd, input.sessionId, {
@@ -351,20 +333,8 @@ export async function readMessages(cwd: string, sessionId: string): Promise<Sess
   return readJsonl<SessionMessageRecord>(createSessionLayout(cwd, sessionId).messagesPath);
 }
 
-export async function readToolCalls(cwd: string, sessionId: string): Promise<SessionToolCallRecord[]> {
-  return readJsonl<SessionToolCallRecord>(createSessionLayout(cwd, sessionId).toolCallsPath);
-}
-
-export async function readFileCalls(cwd: string, sessionId: string): Promise<SessionFileCallRecord[]> {
-  return readJsonl<SessionFileCallRecord>(createSessionLayout(cwd, sessionId).fileCallsPath);
-}
-
 export async function readEvents(cwd: string, sessionId: string): Promise<SessionEventRecord[]> {
   return readJsonl<SessionEventRecord>(createSessionLayout(cwd, sessionId).eventsPath);
-}
-
-export async function getNextMessageId(cwd: string, sessionId: string): Promise<number> {
-  return getNextId(createSessionLayout(cwd, sessionId).messagesPath);
 }
 
 export async function appendSessionMessage(
@@ -382,42 +352,6 @@ export async function appendSessionMessage(
       ...rest,
     };
     await appendJsonl(layout.messagesPath, fullRecord);
-    return fullRecord;
-  });
-}
-
-export async function appendSessionToolCall(
-  cwd: string,
-  sessionId: string,
-  record: Omit<SessionToolCallRecord, "id"> & { id?: number },
-): Promise<SessionToolCallRecord> {
-  const layout = createSessionLayout(cwd, sessionId);
-  return withFileLock(layout.toolCallsPath, async () => {
-    const { turnId, id: callerId, ...rest } = record;
-    const fullRecord: SessionToolCallRecord = {
-      ...(turnId !== undefined ? { turnId } : {}),
-      id: callerId ?? await getNextId(layout.toolCallsPath),
-      ...rest,
-    };
-    await appendJsonl(layout.toolCallsPath, fullRecord);
-    return fullRecord;
-  });
-}
-
-export async function appendSessionFileCall(
-  cwd: string,
-  sessionId: string,
-  record: Omit<SessionFileCallRecord, "id"> & { id?: number },
-): Promise<SessionFileCallRecord> {
-  const layout = createSessionLayout(cwd, sessionId);
-  return withFileLock(layout.fileCallsPath, async () => {
-    const { turnId, id: callerId, ...rest } = record;
-    const fullRecord: SessionFileCallRecord = {
-      ...(turnId !== undefined ? { turnId } : {}),
-      id: callerId ?? await getNextId(layout.fileCallsPath),
-      ...rest,
-    };
-    await appendJsonl(layout.fileCallsPath, fullRecord);
     return fullRecord;
   });
 }
@@ -454,22 +388,6 @@ export async function removeSessionMessagesById(
   await withFileLock(layout.messagesPath, async () => {
     const records = await readJsonl<SessionMessageRecord>(layout.messagesPath);
     await rewriteJsonlRecords(layout.messagesPath, records.filter(record => !seqSet.has(record.id)));
-  });
-}
-
-export async function removeSessionFileCallsById(
-  cwd: string,
-  sessionId: string,
-  seqs: number[],
-): Promise<void> {
-  if (seqs.length === 0) {
-    return;
-  }
-  const layout = createSessionLayout(cwd, sessionId);
-  const seqSet = new Set(seqs);
-  await withFileLock(layout.fileCallsPath, async () => {
-    const records = await readJsonl<SessionFileCallRecord>(layout.fileCallsPath);
-    await rewriteJsonlRecords(layout.fileCallsPath, records.filter(record => !seqSet.has(record.id)));
   });
 }
 

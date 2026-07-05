@@ -38,8 +38,6 @@ export function registerBlockAgentCoreTool(pi: ExtensionAPI): void {
       mountIds: Type.Optional(Type.Array(Type.Union([Type.String(), Type.Number()]))),
       metadata: Type.Optional(Type.Object({}, { additionalProperties: true })),
       messages: Type.Optional(Type.Array(Type.Object({}, { additionalProperties: true }))),
-      toolCalls: Type.Optional(Type.Array(Type.Object({}, { additionalProperties: true }))),
-      fileCalls: Type.Optional(Type.Array(Type.Object({}, { additionalProperties: true }))),
     }) as any,
     async execute(
       _toolCallId: string,

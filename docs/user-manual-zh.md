@@ -39,8 +39,6 @@
 正式运行时文件：
 
 - `messages.jsonl`
-- `tool-calls.jsonl`
-- `file-calls.jsonl`
 - `events.jsonl`
 - `system-config.json`
 
@@ -61,8 +59,8 @@
 
 - 每次实际发送前，system prompt 文本会先实体化写入 `messages.jsonl`
 - 本轮第一条 `input` 的 `parentId` 指向最后一条 `system-config.json`
-- `tool_call` message 会展开同一条工具调用的参数和结果
-- `file_call` message 会引用 `file-calls.jsonl`
+- `tool_call` message 内联存储工具名、参数、结果和错误状态
+- `file_call` message 内联存储文件路径
 - `system-config.json` message 默认不可被普通卸载移除
 
 ## 上下文挂载

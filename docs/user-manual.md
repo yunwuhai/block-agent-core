@@ -39,12 +39,10 @@ Each session lives under:
 Runtime files:
 
 - `messages.jsonl`
-- `tool-calls.jsonl`
-- `file-calls.jsonl`
 - `events.jsonl`
 - `system-config.json`
 
-`messages.jsonl` is the only context mainline and uses `id` plus `parentId`.
+`messages.jsonl` is the only context mainline and uses `id` plus `parentId`. Tool and file data is stored inline in messages.
 
 ## Message Model
 
@@ -60,8 +58,8 @@ Rules:
 
 - system prompt is stored in `system-config.json` and passed directly to the PI SDK during `send_message`
 - each send starts with an `input` message, followed by `reasoning`, `tool_call`/`file_call` pairs, and a final `reply`
-- tool call messages reference `tool-calls.jsonl` and expand both call and result
-- file call messages reference `file-calls.jsonl`
+- `tool_call` messages carry tool name, params, result, and error inline
+- `file_call` messages carry the referenced file path inline
 
 ## Context Mounting
 
