@@ -10,6 +10,7 @@ import {
   readSessionConfig,
   readMessages,
   unmountContext,
+  updateSessionConfig,
 } from "./session-store.ts";
 
 const tmpDir = mkdtempSync(join(process.cwd(), ".tmp-session-store-test-"));
@@ -120,5 +121,25 @@ describe("session store", () => {
 
     const state = await readCurrentContextState(tmpDir, "session-missing-remount");
     expect(state.activeMessageIds).toEqual([]);
+  });
+
+  // ── T1-7: defaultTimeoutMs in session config ────────────────────────────
+
+  it("T1-7: updateSessionConfig persists defaultTimeoutMs", async () => {
+    const promptPath = join(tmpDir, "prompt-timeout-cfg.md");
+    writeFileSync(promptPath, "timeout test", "utf-8");
+    await createSession(tmpDir, {
+      sessionId: "timeout-cfg",
+      systemPromptFilePaths: [promptPath],
+      sdkMode: "host-inherit",
+    });
+
+    const updated = await updateSessionConfig(tmpDir, "timeout-cfg", {
+      defaultTimeoutMs: 120000,
+    });
+    expect(updated.defaultTimeoutMs).toBe(120000);
+
+    const reloaded = await readSessionConfig(tmpDir, "timeout-cfg");
+    expect(reloaded.defaultTimeoutMs).toBe(120000);
   });
 });

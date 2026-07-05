@@ -34,6 +34,8 @@ export function registerBlockAgentCoreTool(pi: ExtensionAPI): void {
       }, { additionalProperties: true })),
       sources: Type.Optional(Type.Array(passthroughObject)),
       temporarySources: Type.Optional(Type.Array(passthroughObject)),
+      timeoutMs: Type.Optional(Type.Number()),
+      defaultTimeoutMs: Type.Optional(Type.Number()),
       idRanges: Type.Optional(Type.Array(Type.Array(Type.Number()))),
       mountIds: Type.Optional(Type.Array(Type.Union([Type.String(), Type.Number()]))),
       metadata: Type.Optional(Type.Object({}, { additionalProperties: true })),

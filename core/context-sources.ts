@@ -111,9 +111,6 @@ export async function loadJsonlFieldsSource(source: JsonlFieldsSource): Promise<
         `Result: ${JSON.stringify(record.toolResult ?? null, null, 2)}`,
       ].join("\n");
     }
-    if (kind === "file_call" && typeof record.filePath === "string") {
-      return `File: ${record.filePath}`;
-    }
     return "";
   }
 

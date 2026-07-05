@@ -11,7 +11,7 @@ import type { SubagentModelSelection, SubagentToolSelection } from "./subagent-r
 const fileLocks = new Map<string, Promise<void>>();
 
 export type SessionSdkMode = "host-inherit" | "standalone-sdk";
-export type SessionMessageKind = "input" | "reasoning" | "reply" | "tool_call" | "file_call";
+export type SessionMessageKind = "input" | "reasoning" | "reply" | "tool_call";
 
 export interface StandaloneSdkOptions {
   sdkModulePath?: string;
@@ -40,6 +40,7 @@ export interface SessionSystemConfig {
   systemPromptText: string;
   sdkMode: SessionSdkMode;
   nextTurnId: number;
+  defaultTimeoutMs?: number;
   modelSelection?: SubagentModelSelection;
   tools?: SubagentToolSelection;
   sdkOptions?: StandaloneSdkOptions;
@@ -56,8 +57,12 @@ export interface SessionMessageRecord {
   toolParams?: unknown;
   toolResult?: unknown;
   toolError?: boolean;
-  // inline file path (kind === "file_call")
-  filePath?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  // per-turn token usage (kind === "reply")
+  usage?: { inputTokens?: number; outputTokens?: number };
+  // per-turn execution duration in ms (kind === "reply")
+  durationMs?: number;
   tags?: string[];
   handoff?: string;
   metadata?: Record<string, unknown>;
@@ -282,6 +287,7 @@ export async function updateSessionConfig(
   patch: {
     systemPromptFilePaths?: string[];
     sdkMode?: SessionSdkMode;
+    defaultTimeoutMs?: number;
     modelSelection?: SubagentModelSelection;
     tools?: SubagentToolSelection;
     sdkOptions?: StandaloneSdkOptions;
@@ -292,6 +298,7 @@ export async function updateSessionConfig(
     ...current,
     ...(patch.systemPromptFilePaths ? { systemPromptFilePaths: [...patch.systemPromptFilePaths] } : {}),
     ...(patch.sdkMode ? { sdkMode: patch.sdkMode } : {}),
+    ...(patch.defaultTimeoutMs !== undefined ? { defaultTimeoutMs: patch.defaultTimeoutMs } : {}),
     ...(patch.modelSelection ? { modelSelection: patch.modelSelection } : {}),
     ...(patch.tools ? { tools: patch.tools } : {}),
     ...(patch.sdkOptions ? { sdkOptions: patch.sdkOptions } : {}),
@@ -303,6 +310,7 @@ export async function updateSessionConfig(
     payload: {
       ...(patch.systemPromptFilePaths ? { systemPromptFilePaths: patch.systemPromptFilePaths } : {}),
       ...(patch.sdkMode ? { sdkMode: patch.sdkMode } : {}),
+      ...(patch.defaultTimeoutMs !== undefined ? { defaultTimeoutMs: patch.defaultTimeoutMs } : {}),
       ...(patch.modelSelection ? { modelSelection: patch.modelSelection } : {}),
       ...(patch.tools ? { tools: patch.tools } : {}),
       ...(patch.sdkOptions ? { sdkOptions: patch.sdkOptions } : {}),
@@ -321,7 +329,8 @@ export async function listSessions(cwd: string): Promise<SessionSystemConfig[]> 
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     try {
-      sessions.push(await readSessionConfig(cwd, entry.name));
+      const config = await readSessionConfig(cwd, entry.name);
+      sessions.push(config);
     } catch {
       // Ignore malformed session directories.
     }

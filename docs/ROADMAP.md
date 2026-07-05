@@ -14,15 +14,32 @@
 
 ## Tier 1 — 高价值、低成本（优先实施）
 
-### T1-1 `delete_session` ★★★ $
+### T1-1 Token 用量统计 ★★★ $
 
-可以 create 但不能 delete，session 只增不减。
+`onEvent` 回调已接收 PI SDK 事件，只需记录。
 
-- 新文件: `tool/actions/delete-session.ts`
-- 核心: `core/session-store.ts` 加 `removeSession(cwd, sessionId)` 递归删除 session 目录
-- 注意: 是否检查有正在运行的 send？建议硬删除，保持简单
+- `SessionMessageRecord`（kind: reply）加 `usage: { inputTokens, outputTokens }`
+- 每个 turn 结束时随 reply 消息一起持久化，区分输入/输出 token
+- 管道: `adapter/pi-sdk.ts` (采集) → `session-runtime.ts` (记录到 reply 消息)
 
-### T1-2 关键模块单元测试 ★★★ $$
+### T1-2 执行时间记录 ★★ $
+
+Turn 级别和 tool 级别分开记录。
+
+- `SessionMessageRecord`（kind: reply）加 `durationMs` — 整个 turn 的耗时
+- `SessionMessageRecord`（kind: tool_call）加 `startedAt` / `finishedAt` — 单个工具耗时
+- `session-runtime.ts` 用 `Date.now()` 包裹关键路径
+
+### T1-3 可配置超时 ★★★ $
+
+`AbortSignal` 已在 adapter 层实现，通过 `AbortController` 竞速超时。
+
+- `SessionSendRequest` 加 `timeoutMs` — 请求级超时
+- `SessionSystemConfig` 加 `defaultTimeoutMs` — 会话级默认超时
+- `adapter/pi-sdk.ts` 用 `AbortController` 竞速超时（PI SDK 无原生超时支持）
+- 优先级: request.timeoutMs > config.defaultTimeoutMs
+
+### T1-4 关键模块单元测试 ★★★ $$
 
 13 个源文件无对应测试，优先级：
 
@@ -31,47 +48,6 @@
 3. `core/session-runtime.ts` — 执行引擎核心，需 mock PI SDK
 4. `tool/actions/send-task.ts` — 最重要的 action handler
 5. `adapter/pi-sdk.ts` — PI SDK 集成，可用 mock
-
-### T1-3 Session 标签/备注 ★★ $
-
-session 多了无法区分用途。
-
-- `SessionSystemConfig` 加 `tags: string[]` 和 `note?: string`
-- `list_sessions` 支持按 tag 过滤
-- `session-store.ts` 已有 `tags` 字段在 message 层面，扩展即可
-
-### T1-4 Token 用量统计 ★★★ $
-
-`onEvent` 回调已接收 PI SDK 事件，只需记录。
-
-- `SessionMessageRecord` 或 event payload 加 `usage: { inputTokens, outputTokens }`
-- `send_finished` event payload 加 token 汇总
-- 管道: `adapter/pi-sdk.ts` (采集) → `session-runtime.ts` (记录) → `session-store.ts` (持久化)
-
-### T1-5 执行时间记录 ★★ $
-
-`durationMs` 已存在 tool block 上，扩展到 send 级别即可。
-
-- `send_finished` event payload 加 `durationMs`
-- `session-runtime.ts` 用 `performance.now()` 包裹 `executeSessionTask`
-- `SessionMessageRecord`（kind: tool_call）加 `startedAt` / `finishedAt`
-
-### T1-6 错误分类 ★★ $
-
-当前 `error: boolean` 无法区分可重试和不可重试。
-
-- `SessionMessageRecord`（kind: tool_call）加 `errorCode: string` 和 `errorCategory: "transient" | "terminal" | "resource_exhausted"`
-- `adapter/pi-sdk.ts` 映射 PI SDK 错误到分类
-- `session-runtime.ts` 用分类决定重试策略
-
-### T1-7 可配置超时 ★★★ $
-
-`AbortSignal` 已收到但被丢弃，PI SDK 调用无超时保护。
-
-- `SessionSendRequest` 加 `timeoutMs`
-- `SessionSystemConfig` 加 `defaultTimeoutMs`
-- `adapter/pi-sdk.ts` 用 `AbortController` 竞速超时
-- `SubagentToolSelection` 加 `toolTimeoutMs`
 
 ---
 
@@ -125,7 +101,7 @@ session 无限增长会超出模型上下文窗口。
 只能全量读 messages，无法按条件查询。
 
 - 新文件: `tool/actions/search-messages.ts`
-- 参数: `sessionId`, `query?`, `kind?`, `toolName?`, `filePath?`, `turnId?`
+- 参数: `sessionId`, `query?`, `kind?`, `toolName?`, `turnId?`
 - 实现: 内存扫描 JSONL 文件（小规模足够）
 
 ### T2-7 Session 导入/导出 ★★ $$
@@ -205,7 +181,7 @@ send 完成后主动通知外部系统。
 
 按 session/子 agent 设定 token 预算，超支自动降级或停止。
 
-- 依赖 T1-4 (token 统计)
+- 依赖 T1-1 (token 统计)
 - `SessionSystemConfig` 加 `budget: { maxTokens, maxCostUsd }`
 - 累计用量存入 `SessionSystemConfig.usage`
 - 超支时: emit `budget_exceeded` event → 截断上下文 / 降级模型 / 停止
@@ -247,15 +223,14 @@ prompt 或工具变更后对比行为差异。
 
 ---
 
-
 ## 建议实施节奏
 
 | 阶段 | 内容 | 时间 |
 |------|------|------|
-| Phase 1 | T1-1 delete + T1-2 测试 + T1-4 Token + T1-7 超时 | Week 1-2 |
-| Phase 2 | T1-3 标签 + T1-5 计时 + T1-6 错误分类 + T2-8 流式 | Week 3-4 |
-| Phase 3 | T2-1 分叉 + T2-2 检查点 + T2-3 调度持久化 | Week 5-6 |
-| Phase 4 | T2-4 幂等 + T2-5 上下文预算 + T2-10 清理 | Week 7-8 |
+| Phase 1 | T1-1 Token + T1-2 计时 + T1-3 超时 + T1-4 测试 | Week 1-2 |
+| Phase 2 | T2-1 分叉 + T2-2 检查点 + T2-3 调度持久化 | Week 3-4 |
+| Phase 3 | T2-4 幂等 + T2-5 上下文预算 + T2-10 清理 | Week 5-6 |
+| Phase 4 | T2-6 搜索 + T2-7 导入导出 + T2-8 流式 | Week 7-8 |
 | Phase 5+ | T3 各项按需推进 | Month 3+ |
 
 ---
@@ -267,11 +242,18 @@ prompt 或工具变更后对比行为差异。
 | # | 描述 | 状态 |
 |---|------|------|
 | 1 | `unmountContext` 返回类型 `removedIds` 重复 key | ✅ 已修复 (2026-07-05) |
-| 2 | `AbortSignal` 丢弃 | 🟡 功能缺失，非 bug |
+| 2 | `AbortSignal` 丢弃 | ✅ 已修复 (2026-07-05, T1-3) |
 | 3 | 文件锁仅进程内 | 🟡 设计限制，已写入文档 |
 | 4 | system_prompt 未入 messages（文档错误）| ✅ 已修正文档 (2026-07-05) |
 | 5 | tool-calls.jsonl + file-calls.jsonl 合并到 messages.jsonl | ✅ 已完成 (2026-07-05) |
 
-### 预存的 tsc 问题（不影响运行，待修复）
+### 设计决策记录
 
-（无——上次重构已修复 `toolCallSeq`/`fileCallSeq` 误名 bug）
+| # | 决策 | 原因 | 日期 |
+|---|------|------|------|
+| 1 | 不实现 tags/notes/tag 过滤 | 属于上层业务逻辑，不应在 core 中实现 | 2026-07-06 |
+| 2 | 不实现 delete_session | 中间删除会影响 id 连续性，暂时不需要 | 2026-07-06 |
+| 3 | 不实现 file_call kind | read 工具 result 已包含完整文件内容，file_call 冗余 | 2026-07-06 |
+| 4 | 不实现错误分类 | 功能用途和使用方式尚未理清，暂缓 | 2026-07-06 |
+| 5 | Token 记录在 reply 消息上 | 每个 turn 独立，随 reply 一起持久化，区分 input/output | 2026-07-06 |
+| 6 | 时间记录分两级 | reply.durationMs（turn 级）+ tool_call[startedAt/finishedAt]（工具级）| 2026-07-06 |

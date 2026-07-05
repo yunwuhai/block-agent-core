@@ -50,24 +50,22 @@ describe("context sources", () => {
     expect(content).toBe("three");
   });
 
-  it("expands message references into tool and file call payloads", async () => {
+  it("expands message references into tool call payloads", async () => {
     const dir = join(tmpDir, "expanded");
     const messagesPath = join(dir, "messages.jsonl");
 
     await appendJsonl(messagesPath, { id: 1, kind: "tool_call", toolName: "read", toolParams: { path: "/tmp/a.ts" }, toolResult: { ok: true } });
-    await appendJsonl(messagesPath, { id: 2, kind: "file_call", filePath: "/tmp/a.ts" });
 
     const content = await loadContextSource({
       type: "jsonl-fields",
       filePath: messagesPath,
       startSequence: 1,
-      endSequence: 2,
+      endSequence: 1,
       expandReferences: true,
     });
 
     expect(content).toContain("Tool: read");
     expect(content).toContain("Result:");
-    expect(content).toContain("File: /tmp/a.ts");
   });
 
   it("supports pluggable custom loaders", async () => {

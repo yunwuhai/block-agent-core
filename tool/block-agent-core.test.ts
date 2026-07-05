@@ -190,15 +190,13 @@ describe("session-first actions", () => {
 
     const sessionDir = join(tmpDir, ".block-agent-core", "sessions", "session-b");
     const messages = await readJsonl<{ kind: string; text?: string; toolName?: string; filePath?: string }>(join(sessionDir, "messages.jsonl"));
-    expect(messages.map(item => item.kind)).toEqual(["input", "reasoning", "tool_call", "file_call", "reply"]);
+    expect(messages.map(item => item.kind)).toEqual(["input", "reasoning", "tool_call", "reply"]);
     const systemConfig = JSON.parse(readFileSync(join(sessionDir, "system-config.json"), "utf-8"));
     expect(systemConfig.systemPromptText).toContain("You are a coding session.");
     expect(systemConfig.systemPromptFilePaths).toEqual([promptPath]);
 
     const toolCallMsg = messages.find(m => m.kind === "tool_call");
     expect(toolCallMsg!.toolName).toBe("read");
-    const fileCallMsg = messages.find(m => m.kind === "file_call");
-    expect(fileCallMsg!.filePath).toBe(notePath);
   });
 
   it("supports seq-range unmount and remount", async () => {

@@ -27,6 +27,7 @@ export interface SessionSendRequest {
   inputId: number;
   parentId?: number;
   temporarySources?: ContextSource[];
+  timeoutMs?: number;
   metadata?: Record<string, unknown>;
 }
 
@@ -50,16 +51,6 @@ const defaultDeps: SessionTaskRunnerDeps = {
   runWithSdk: runSubagentWithPiSdk,
 };
 
-function isFileAccessTool(toolName: string): boolean {
-  return toolName === "read" || toolName === "write" || toolName === "edit";
-}
-
-function inferFilePath(params: unknown): string | undefined {
-  if (!params || typeof params !== "object") return undefined;
-  const candidate = (params as Record<string, unknown>).path;
-  return typeof candidate === "string" ? candidate : undefined;
-}
-
 function formatToolCallMessage(toolName: string, params: unknown, result: unknown, error?: boolean): string {
   return [
     `Tool: ${toolName}`,
@@ -67,10 +58,6 @@ function formatToolCallMessage(toolName: string, params: unknown, result: unknow
     `Error: ${error ? "true" : "false"}`,
     `Result: ${JSON.stringify(result, null, 2)}`,
   ].join("\n");
-}
-
-function formatFileCallMessage(filePath: string): string {
-  return `File: ${filePath}`;
 }
 
 function resolveExpandedMessageText(message: SessionMessageRecord): string {
@@ -81,9 +68,6 @@ function resolveExpandedMessageText(message: SessionMessageRecord): string {
       message.toolResult ?? null,
       message.toolError,
     );
-  }
-  if (message.kind === "file_call" && message.filePath) {
-    return formatFileCallMessage(message.filePath);
   }
   return message.text ?? "";
 }
@@ -143,6 +127,7 @@ export async function executeSessionTask(
   ctx: ExtensionContextLike,
   deps: SessionTaskRunnerDeps = defaultDeps,
 ): Promise<SessionTaskExecutionResult> {
+  const startedAt = Date.now();
   const config = await readSessionConfig(cwd, sessionId);
   const activeMounts = await listContextMounts(cwd, sessionId);
 
@@ -163,6 +148,9 @@ export async function executeSessionTask(
     .filter(part => part.trim().length > 0)
     .join("\n\n");
 
+  // Resolve timeout: request-level takes precedence over config-level
+  const timeoutMs = request.timeoutMs ?? config.defaultTimeoutMs;
+
   const sentMessageIds = [...historyContext.activeMessageIds, request.inputId];
   await appendSessionEvent(cwd, sessionId, {
     turnId: request.turnId,
@@ -177,6 +165,7 @@ export async function executeSessionTask(
 
   const pendingStarted = new Map<string, Record<string, unknown>>();
   const pendingFinished = new Map<string, Record<string, unknown>>();
+  const toolStartedAt = new Map<string, string>();
 
   const result = await deps.runWithSdk({
     inputText: request.inputText,
@@ -192,15 +181,20 @@ export async function executeSessionTask(
     ...(config.tools ? { tools: config.tools } : {}),
     sdkMode: config.sdkMode,
     ...(config.sdkOptions ? { sdkOptions: config.sdkOptions } : {}),
+    ...(timeoutMs ? { timeoutMs } : {}),
     onEvent: async (event) => {
       if (event.type === "tool_call_started") {
-        pendingStarted.set(event.payload.toolCallId as string, event.payload);
+        const sdkId = event.payload.toolCallId as string;
+        pendingStarted.set(sdkId, event.payload);
+        toolStartedAt.set(sdkId, new Date().toISOString());
       }
       if (event.type === "tool_call_finished") {
         pendingFinished.set(event.payload.toolCallId as string, event.payload);
       }
     },
   });
+
+  const durationMs = Date.now() - startedAt;
 
   const outputMessageIds: number[] = [];
   let currentParentId = request.inputId;
@@ -217,6 +211,10 @@ export async function executeSessionTask(
   const sdkToMessageId = new Map<string, number>();
 
   for (const trace of result.toolCalls) {
+    const isError = Boolean(trace.metadata?.isError);
+    const startedAt = toolStartedAt.get(trace.id);
+    const finishedAt = new Date().toISOString();
+
     const toolCallMessage = await appendSessionMessage(cwd, sessionId, {
       kind: "tool_call",
       parentId: currentParentId,
@@ -224,44 +222,41 @@ export async function executeSessionTask(
       toolName: trace.toolName,
       toolParams: trace.params,
       toolResult: trace.result,
-      toolError: Boolean(trace.metadata?.isError),
+      toolError: isError,
+      ...(startedAt ? { startedAt } : {}),
+      finishedAt,
       ...(trace.metadata ? { metadata: trace.metadata } : {}),
     });
     sdkToMessageId.set(trace.id, toolCallMessage.id);
     outputMessageIds.push(toolCallMessage.id);
     currentParentId = toolCallMessage.id;
-
-    const filePath = inferFilePath(trace.params);
-    if (filePath && isFileAccessTool(trace.toolName)) {
-      const fileCallMessage = await appendSessionMessage(cwd, sessionId, {
-        kind: "file_call",
-        parentId: currentParentId,
-        turnId: request.turnId,
-        filePath,
-      });
-      outputMessageIds.push(fileCallMessage.id);
-      currentParentId = fileCallMessage.id;
-    }
   }
 
   // Write deferred tool events referencing messageId instead of toolCallId
-  for (const [sdkId, _startedPayload] of pendingStarted) {
+  for (const [sdkId, startedPayload] of pendingStarted) {
     const messageId = sdkToMessageId.get(sdkId);
     if (messageId !== undefined) {
       await appendSessionEvent(cwd, sessionId, {
         turnId: request.turnId,
         type: "tool_send_started",
-        payload: { messageId },
+        payload: {
+          messageId,
+          toolName: startedPayload.toolName,
+        },
       });
     }
   }
-  for (const [sdkId, _finishedPayload] of pendingFinished) {
+  for (const [sdkId, finishedPayload] of pendingFinished) {
     const messageId = sdkToMessageId.get(sdkId);
     if (messageId !== undefined) {
       await appendSessionEvent(cwd, sessionId, {
         turnId: request.turnId,
         type: "tool_send_finished",
-        payload: { messageId },
+        payload: {
+          messageId,
+          toolName: finishedPayload.toolName,
+          isError: finishedPayload.isError,
+        },
       });
     }
   }
@@ -271,6 +266,8 @@ export async function executeSessionTask(
     text: result.replyText,
     parentId: currentParentId,
     turnId: request.turnId,
+    ...(result.usage ? { usage: result.usage } : {}),
+    durationMs,
   });
   outputMessageIds.push(replyMessage.id);
 

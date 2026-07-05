@@ -26,7 +26,6 @@ export async function handleArchiveSession(
         ...(message.toolParams !== undefined ? { toolParams: message.toolParams } : {}),
         ...(message.toolResult !== undefined ? { toolResult: message.toolResult } : {}),
         ...(message.toolError !== undefined ? { toolError: message.toolError } : {}),
-        ...(message.filePath !== undefined ? { filePath: message.filePath } : {}),
         ...(message.tags ? { tags: message.tags } : {}),
         ...(message.handoff ? { handoff: message.handoff } : {}),
         ...(message.metadata ? { metadata: message.metadata } : {}),

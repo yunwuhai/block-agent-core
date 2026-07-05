@@ -100,6 +100,7 @@ export interface PiSdkRunOptions extends SubagentRunRequest {
   settingsManager?: SettingsManager;
   sdkMode?: SessionSdkMode;
   sdkOptions?: StandaloneSdkOptions;
+  timeoutMs?: number;
   onEvent?: (event: { type: string; payload: Record<string, unknown> }) => void | Promise<void>;
 }
 
@@ -111,6 +112,8 @@ export interface PiSdkRunResult {
   reasoningText: string;
   replyText: string;
   toolCalls: ToolCallTrace[];
+  usage?: { inputTokens?: number; outputTokens?: number };
+  durationMs?: number;
 }
 
 interface ToolExecutionStartLike {
@@ -236,11 +239,15 @@ function finalizeToolTrace(
     ...trace,
     messageId,
     result: event.result,
-    metadata: { isError: event.isError },
+    metadata: {
+      isError: event.isError,
+    },
   };
 }
 
 export async function runSubagentWithPiSdk(options: PiSdkRunOptions): Promise<PiSdkRunResult> {
+  const startedAt = Date.now();
+
   let runtimeModelRegistry = options.modelRegistry;
   let runtimeCurrentModel = options.currentModel;
   let pi = options.piSdkModule ?? await importPiCodingAgentSdk(options.sdkOptions?.sdkModulePath);
@@ -265,13 +272,19 @@ export async function runSubagentWithPiSdk(options: PiSdkRunOptions): Promise<Pi
       : promptInput,
   );
 
+  // Timeout support via AbortController
+  const timeoutMs = options.timeoutMs;
+  let abortController: AbortController | undefined;
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
   const sessionOptions = {
     modelRegistry: runtimeModelRegistry,
     model,
     tools,
     sessionManager: SessionManager.inMemory(),
   };
-  const { session } = await createAgentSession({
+
+  const createSessionOpts: Record<string, unknown> = {
     ...sessionOptions,
     ...(options.cwd ? { cwd: options.cwd } : {}),
     ...(options.agentDir ? { agentDir: options.agentDir } : {}),
@@ -279,10 +292,19 @@ export async function runSubagentWithPiSdk(options: PiSdkRunOptions): Promise<Pi
     ...(options.customTools ? { customTools: options.customTools } : {}),
     ...(options.resourceLoader ? { resourceLoader: options.resourceLoader } : {}),
     ...(options.settingsManager ? { settingsManager: options.settingsManager } : {}),
-  });
+  };
+
+  if (timeoutMs && timeoutMs > 0) {
+    abortController = new AbortController();
+    createSessionOpts.signal = abortController.signal;
+    timeoutId = setTimeout(() => abortController!.abort(), timeoutMs);
+  }
+
+  const { session } = await createAgentSession(createSessionOpts);
 
   let reasoningText = "";
   let replyText = "";
+  let usage: { inputTokens?: number; outputTokens?: number } | undefined;
   const pendingToolCalls = new Map<string, ToolCallTrace>();
   const finishedToolCalls: ToolCallTrace[] = [];
 
@@ -293,6 +315,23 @@ export async function runSubagentWithPiSdk(options: PiSdkRunOptions): Promise<Pi
       }
       if (event.assistantMessageEvent.type === "text_delta") {
         replyText += event.assistantMessageEvent.delta;
+      }
+      // Capture token usage if available
+      if (typeof event.assistantMessageEvent.inputTokens === "number") {
+        usage = { ...usage, inputTokens: event.assistantMessageEvent.inputTokens };
+      }
+      if (typeof event.assistantMessageEvent.outputTokens === "number") {
+        usage = { ...usage, outputTokens: event.assistantMessageEvent.outputTokens };
+      }
+    }
+
+    // Capture usage from dedicated usage event if emitted
+    if (event.type === "usage" || event.type === "token_usage") {
+      if (typeof event.inputTokens === "number" || typeof event.outputTokens === "number") {
+        usage = {
+          ...(typeof event.inputTokens === "number" ? { inputTokens: event.inputTokens } : {}),
+          ...(typeof event.outputTokens === "number" ? { outputTokens: event.outputTokens } : {}),
+        };
       }
     }
 
@@ -314,7 +353,8 @@ export async function runSubagentWithPiSdk(options: PiSdkRunOptions): Promise<Pi
         toolName: event.toolName,
         args: {},
       });
-      finishedToolCalls.push(finalizeToolTrace(existing, event, `${options.runId}:reply`));
+      const finalized = finalizeToolTrace(existing, event, `${options.runId}:reply`);
+      finishedToolCalls.push(finalized);
       pendingToolCalls.delete(event.toolCallId);
       void options.onEvent?.({
         type: "tool_call_finished",
@@ -331,9 +371,12 @@ export async function runSubagentWithPiSdk(options: PiSdkRunOptions): Promise<Pi
   try {
     await session.prompt(prompt);
   } finally {
+    if (timeoutId) clearTimeout(timeoutId);
     unsubscribe();
     session.dispose();
   }
+
+  const durationMs = Date.now() - startedAt;
 
   return {
     runId: options.runId,
@@ -343,5 +386,7 @@ export async function runSubagentWithPiSdk(options: PiSdkRunOptions): Promise<Pi
     reasoningText,
     replyText,
     toolCalls: finishedToolCalls,
+    ...(usage ? { usage } : {}),
+    durationMs,
   };
 }
