@@ -524,12 +524,11 @@ export async function unmountContext(
   cwd: string,
   sessionId: string,
   input: { idRanges?: number[][]; mountIds?: Array<string | number> },
-): Promise<{ removedIds: number[]; removedIds: number[] }> {
+): Promise<{ removedMountIds: number[]; removedMessageIds: number[] }> {
   await readSessionConfig(cwd, sessionId);
   const activeMounts = await listContextMounts(cwd, sessionId);
   const messages = await readMessages(cwd, sessionId);
   const currentState = await readCurrentContextState(cwd, sessionId);
-  const messagesById = new Map(messages.map(message => [message.id, message]));
   const childrenByParent = buildChildrenMap(messages);
   const activeIdSet = new Set(currentState.activeMessageIds);
 
@@ -569,8 +568,8 @@ export async function unmountContext(
   }
 
   return {
-    removedIds,
-    removedIds: [...removedIdSet].sort((a, b) => a - b),
+    removedMountIds: removedIds,
+    removedMessageIds: [...removedIdSet].sort((a, b) => a - b),
   };
 }
 

@@ -50,7 +50,6 @@ Runtime files:
 
 Supported message kinds:
 
-- `system-config.json`
 - `input`
 - `reasoning`
 - `reply`
@@ -59,11 +58,10 @@ Supported message kinds:
 
 Rules:
 
-- system prompt text is materialized into `messages.jsonl` before each send
-- the first input of a send points to the last system prompt message
+- system prompt is stored in `system-config.json` and passed directly to the PI SDK during `send_message`
+- each send starts with an `input` message, followed by `reasoning`, `tool_call`/`file_call` pairs, and a final `reply`
 - tool call messages reference `tool-calls.jsonl` and expand both call and result
 - file call messages reference `file-calls.jsonl`
-- system prompt messages are not removed by normal unload operations
 
 ## Context Mounting
 
@@ -101,7 +99,7 @@ Main event types:
 - `tool_send_started`
 - `tool_send_finished`
 
-`read_events` can filter by `requestKey`.
+`read_events` can filter by `turnId`.
 
 ## SDK Modes
 
@@ -112,6 +110,10 @@ Reuses the host PI runtime, model registry, and auth environment.
 ### `standalone-sdk`
 
 Uses explicit SDK and auth settings from `sdkOptions`.
+
+## Limitations
+
+- **File locks are in-process only**: the `withFileLock` mechanism in `session-store.ts` uses in-memory mutexes. Two PI instances sharing the same `.block-agent-core/` directory on the same filesystem may race on JSONL writes. The intended deployment model is a single PI instance per workspace directory.
 
 ## Commands
 

@@ -92,7 +92,7 @@ describe("session store", () => {
     });
 
     const result = await unmountContext(tmpDir, "session-unmount", { idRanges: [[3, 3]] });
-    expect(result.removedIds).toEqual([3, 4]);
+    expect(result.removedMessageIds).toEqual([3, 4]);
 
     const state = await readCurrentContextState(tmpDir, "session-unmount");
     expect(state.activeMessageIds).toEqual([1, 2]);

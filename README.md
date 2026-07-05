@@ -44,7 +44,6 @@ Each session stores:
 
 Message kinds:
 
-- `system_prompt`
 - `input`
 - `reasoning`
 - `reply`
@@ -54,8 +53,7 @@ Message kinds:
 Notes:
 
 - `tool_call` messages expand both tool params and tool results
-- `system_prompt` messages are written before each actual send
-- `system_prompt` messages are protected from normal unload operations
+- system prompt is stored in `system-config.json` and passed to the PI SDK at send time
 - active history is tracked by `seq` ranges, not by round/task tables
 
 ## Context Loading

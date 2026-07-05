@@ -50,7 +50,6 @@ Typical fields:
 
 - `sessionId`
 - `inputText`
-- optional `requestKey`
 - optional `temporarySources`
 
 ### `read_events`
@@ -60,7 +59,7 @@ Use when you want to inspect lifecycle and tool activity.
 You can filter by:
 
 - `sessionId`
-- optional `requestKey`
+- optional `turnId`
 
 ## Storage model
 
