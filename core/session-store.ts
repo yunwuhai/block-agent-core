@@ -1,18 +1,14 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import type { ContextSource } from "./context-sources.ts";
-import type { PiModelSummary } from "../adapter/pi-sdk.ts";
+import { appendJsonl, readJsonl } from "../utils/jsonl.ts";
 import type { SubagentModelSelection, SubagentToolSelection } from "./subagent-run.ts";
-import { appendJsonl, readJsonl, writeJsonl } from "../utils/jsonl.ts";
 
 const fileLocks = new Map<string, Promise<void>>();
 
 export type SessionSdkMode = "host-inherit" | "standalone-sdk";
-export type SessionMessageKind = "reasoning" | "reply" | "note" | "tool_call" | "file_call";
-export type SessionTaskStatus = "queued" | "running" | "completed" | "failed";
-export type FileAccessType = "read" | "write" | "edit" | "reference" | "system-prompt";
+export type SessionMessageKind = "system_prompt" | "input" | "reasoning" | "reply" | "tool_call" | "file_call";
 
 export interface StandaloneSdkOptions {
   sdkModulePath?: string;
@@ -27,13 +23,13 @@ export interface StandaloneSdkOptions {
 }
 
 export interface ContextMount {
-  id: string;
-  createdAt: string;
-  sources: ContextSource[];
+  id: number;
+  sources?: ContextSource[];
+  seqRanges?: number[][];
   metadata?: Record<string, unknown>;
 }
 
-export interface SessionSystemPromptsConfig {
+export interface SessionSystemConfig {
   sessionId: string;
   createdAt: string;
   updatedAt: string;
@@ -42,72 +38,43 @@ export interface SessionSystemPromptsConfig {
   modelSelection?: SubagentModelSelection;
   tools?: SubagentToolSelection;
   sdkOptions?: StandaloneSdkOptions;
-  mounts: ContextMount[];
 }
 
 export interface SessionMessageRecord {
-  id: string;
-  sessionId: string;
-  taskId?: string;
-  sequence: number;
+  seq: number;
   kind: SessionMessageKind;
   text?: string;
-  toolCallId?: string;
-  fileCallId?: string;
+  parentSeq?: number;
+  toolCallSeq?: number;
+  fileCallSeq?: number;
+  requestKey?: string;
   tags?: string[];
   handoff?: string;
-  createdAt: string;
   metadata?: Record<string, unknown>;
 }
 
 export interface SessionToolCallRecord {
-  id: string;
-  sessionId: string;
-  taskId: string;
-  messageId?: string;
+  seq: number;
   toolName: string;
   params: unknown;
   result: unknown;
-  createdAt: string;
   error?: boolean;
+  requestKey?: string;
   metadata?: Record<string, unknown>;
 }
 
 export interface SessionFileCallRecord {
-  id: string;
-  sessionId: string;
-  taskId?: string;
-  messageId?: string;
-  toolCallId?: string;
+  seq: number;
   filePath: string;
-  accessType: FileAccessType;
-  createdAt: string;
-  metadata?: Record<string, unknown>;
-}
-
-export interface SessionTaskRecord {
-  id: string;
-  sessionId: string;
-  inputText: string;
-  temporarySources?: ContextSource[];
-  status: SessionTaskStatus;
-  queuePosition?: number;
-  registeredAt: string;
-  startedAt?: string;
-  finishedAt?: string;
-  model?: PiModelSummary;
-  tools?: string[];
-  archiveEnabled?: boolean;
-  errorMessage?: string;
+  requestKey?: string;
   metadata?: Record<string, unknown>;
 }
 
 export interface SessionEventRecord {
-  id: string;
-  taskId: string;
-  sessionId: string;
+  seq: number;
   type: string;
   createdAt: string;
+  requestKey?: string;
   payload: Record<string, unknown>;
 }
 
@@ -116,8 +83,7 @@ export interface SessionLayout {
   messagesPath: string;
   toolCallsPath: string;
   fileCallsPath: string;
-  systemPromptsPath: string;
-  tasksPath: string;
+  systemConfigPath: string;
   eventsPath: string;
 }
 
@@ -128,31 +94,6 @@ export interface CreateSessionInput {
   modelSelection?: SubagentModelSelection;
   tools?: SubagentToolSelection;
   sdkOptions?: StandaloneSdkOptions;
-}
-
-export interface CreateTaskInput {
-  taskId: string;
-  inputText: string;
-  temporarySources?: ContextSource[];
-  archiveEnabled?: boolean;
-  metadata?: Record<string, unknown>;
-}
-
-export function createSessionsRootDir(cwd: string): string {
-  return join(cwd, ".block-agent-core", "sessions");
-}
-
-export function createSessionLayout(cwd: string, sessionId: string): SessionLayout {
-  const rootDir = join(createSessionsRootDir(cwd), sessionId);
-  return {
-    rootDir,
-    messagesPath: join(rootDir, "messages.jsonl"),
-    toolCallsPath: join(rootDir, "tool-calls.jsonl"),
-    fileCallsPath: join(rootDir, "file-calls.jsonl"),
-    systemPromptsPath: join(rootDir, "system-prompts.json"),
-    tasksPath: join(rootDir, "tasks.jsonl"),
-    eventsPath: join(rootDir, "events.jsonl"),
-  };
 }
 
 function nowIso(): string {
@@ -177,6 +118,146 @@ async function withFileLock<T>(filePath: string, task: () => Promise<T>): Promis
   }
 }
 
+function toNumberRanges(numbers: number[]): number[][] {
+  if (numbers.length === 0) {
+    return [];
+  }
+  const sorted = [...new Set(numbers)].sort((a, b) => a - b);
+  const ranges: number[][] = [];
+  let start = sorted[0]!;
+  let previous = start;
+  for (let index = 1; index < sorted.length; index += 1) {
+    const current = sorted[index]!;
+    if (current === previous + 1) {
+      previous = current;
+      continue;
+    }
+    ranges.push([start, previous]);
+    start = current;
+    previous = current;
+  }
+  ranges.push([start, previous]);
+  return ranges;
+}
+
+function fromNumberRanges(ranges: unknown): number[] {
+  if (!Array.isArray(ranges)) {
+    return [];
+  }
+  const values: number[] = [];
+  for (const item of ranges) {
+    if (!Array.isArray(item) || item.length < 2) {
+      continue;
+    }
+    const start = Number(item[0]);
+    const end = Number(item[1]);
+    if (!Number.isInteger(start) || !Number.isInteger(end) || start > end) {
+      continue;
+    }
+    for (let current = start; current <= end; current += 1) {
+      values.push(current);
+    }
+  }
+  return values;
+}
+
+function normalizeRanges(ranges: unknown): number[][] {
+  return toNumberRanges(fromNumberRanges(ranges));
+}
+
+function isSystemPromptMessage(message: Pick<SessionMessageRecord, "kind"> | undefined): boolean {
+  return message?.kind === "system_prompt";
+}
+
+function buildChildrenMap(messages: SessionMessageRecord[]): Map<number, number[]> {
+  const map = new Map<number, number[]>();
+  for (const message of messages) {
+    const parentSeq = message.parentSeq;
+    if (typeof parentSeq !== "number" || !Number.isInteger(parentSeq)) {
+      continue;
+    }
+    const children = map.get(parentSeq) ?? [];
+    children.push(message.seq);
+    map.set(parentSeq, children);
+  }
+  return map;
+}
+
+function collectDescendantSeqs(
+  startingSeqs: number[],
+  activeSeqs: Set<number>,
+  childrenByParent: Map<number, number[]>,
+): number[] {
+  const seen = new Set<number>();
+  const queue = [...startingSeqs];
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    if (seen.has(current) || !activeSeqs.has(current)) {
+      continue;
+    }
+    seen.add(current);
+    for (const child of childrenByParent.get(current) ?? []) {
+      if (activeSeqs.has(child) && !seen.has(child)) {
+        queue.push(child);
+      }
+    }
+  }
+  return [...seen].sort((a, b) => a - b);
+}
+
+function removeSeqsAndDescendants(
+  activeSeqs: Set<number>,
+  seqRanges: number[][],
+  messagesBySeq: Map<number, SessionMessageRecord>,
+  childrenByParent: Map<number, number[]>,
+): number[] {
+  const seedSeqs = fromNumberRanges(seqRanges)
+    .filter(seq => activeSeqs.has(seq))
+    .filter(seq => !isSystemPromptMessage(messagesBySeq.get(seq)));
+  const removedSeqs = collectDescendantSeqs(seedSeqs, activeSeqs, childrenByParent);
+  for (const seq of removedSeqs) {
+    activeSeqs.delete(seq);
+  }
+  return removedSeqs;
+}
+
+async function readLegacySystemConfig(layout: SessionLayout): Promise<SessionSystemConfig | undefined> {
+  const legacyPath = join(layout.rootDir, "system-prompts.json");
+  if (!existsSync(legacyPath)) {
+    return undefined;
+  }
+  const raw = await readFile(legacyPath, "utf-8");
+  const parsed = JSON.parse(raw) as Record<string, unknown>;
+  return {
+    sessionId: String(parsed.sessionId ?? ""),
+    createdAt: typeof parsed.createdAt === "string" ? parsed.createdAt : nowIso(),
+    updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : nowIso(),
+    systemPromptFilePaths: Array.isArray(parsed.systemPromptFilePaths)
+      ? parsed.systemPromptFilePaths.filter((item): item is string => typeof item === "string")
+      : [],
+    sdkMode: parsed.sdkMode === "standalone-sdk" ? "standalone-sdk" : "host-inherit",
+    ...(parsed.modelSelection ? { modelSelection: parsed.modelSelection as SubagentModelSelection } : {}),
+    ...(parsed.tools ? { tools: parsed.tools as SubagentToolSelection } : {}),
+    ...(parsed.sdkOptions ? { sdkOptions: parsed.sdkOptions as StandaloneSdkOptions } : {}),
+  };
+}
+
+export function createSessionsRootDir(cwd: string): string {
+  return join(cwd, ".block-agent-core", "sessions");
+}
+
+export function createSessionLayout(cwd: string, sessionId: string): SessionLayout {
+  const rootDir = join(createSessionsRootDir(cwd), sessionId);
+  return {
+    rootDir,
+    messagesPath: join(rootDir, "messages.jsonl"),
+    toolCallsPath: join(rootDir, "tool-calls.jsonl"),
+    fileCallsPath: join(rootDir, "file-calls.jsonl"),
+    systemConfigPath: join(rootDir, "system-config.json"),
+    eventsPath: join(rootDir, "events.jsonl"),
+  };
+}
+
 async function ensureParentFile(filePath: string, fallbackContent: string): Promise<void> {
   await mkdir(dirname(filePath), { recursive: true });
   if (!existsSync(filePath)) {
@@ -184,17 +265,62 @@ async function ensureParentFile(filePath: string, fallbackContent: string): Prom
   }
 }
 
+async function rewriteJsonlRecords<T>(
+  filePath: string,
+  records: T[],
+): Promise<void> {
+  await ensureParentFile(filePath, "");
+  const nextContent = records.length > 0
+    ? `${records.map(record => JSON.stringify(record)).join("\n")}\n`
+    : "";
+  await writeFile(filePath, nextContent, "utf-8");
+}
+
+async function getNextSeq(filePath: string, key: string = "seq"): Promise<number> {
+  const records = await readJsonl<Record<string, unknown>>(filePath);
+  const maxSeq = records.reduce((max, record) => {
+    const value = Number(record[key] ?? 0);
+    return Number.isInteger(value) ? Math.max(max, value) : max;
+  }, 0);
+  return maxSeq + 1;
+}
+
+function parseContextMount(payload: Record<string, unknown>): ContextMount | undefined {
+  const raw = payload.mount;
+  if (!raw || typeof raw !== "object") {
+    return undefined;
+  }
+  const candidate = raw as Record<string, unknown>;
+  const id = Number(candidate.id);
+  if (!Number.isInteger(id)) {
+    return undefined;
+  }
+  const sources = Array.isArray(candidate.sources)
+    ? candidate.sources as ContextSource[]
+    : undefined;
+  const seqRanges = normalizeRanges(candidate.seqRanges);
+  const metadata = candidate.metadata && typeof candidate.metadata === "object"
+    ? candidate.metadata as Record<string, unknown>
+    : undefined;
+  return {
+    id,
+    ...(sources?.length ? { sources } : {}),
+    ...(seqRanges.length ? { seqRanges } : {}),
+    ...(metadata ? { metadata } : {}),
+  };
+}
+
 export async function createSession(
   cwd: string,
   input: CreateSessionInput,
-): Promise<{ layout: SessionLayout; config: SessionSystemPromptsConfig }> {
+): Promise<{ layout: SessionLayout; config: SessionSystemConfig }> {
   const layout = createSessionLayout(cwd, input.sessionId);
-  if (existsSync(layout.systemPromptsPath)) {
+  if (existsSync(layout.systemConfigPath) || existsSync(join(layout.rootDir, "system-prompts.json"))) {
     throw new Error(`Session already exists: ${input.sessionId}`);
   }
 
   const createdAt = nowIso();
-  const config: SessionSystemPromptsConfig = {
+  const config: SessionSystemConfig = {
     sessionId: input.sessionId,
     createdAt,
     updatedAt: createdAt,
@@ -203,37 +329,50 @@ export async function createSession(
     ...(input.modelSelection ? { modelSelection: input.modelSelection } : {}),
     ...(input.tools ? { tools: input.tools } : {}),
     ...(input.sdkOptions ? { sdkOptions: input.sdkOptions } : {}),
-    mounts: [],
   };
 
   await mkdir(layout.rootDir, { recursive: true });
-  await writeFile(layout.systemPromptsPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
+  await writeFile(layout.systemConfigPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
   await ensureParentFile(layout.messagesPath, "");
   await ensureParentFile(layout.toolCallsPath, "");
   await ensureParentFile(layout.fileCallsPath, "");
-  await ensureParentFile(layout.tasksPath, "");
   await ensureParentFile(layout.eventsPath, "");
+
+  await appendSessionEvent(cwd, input.sessionId, {
+    type: "session_initialized",
+    payload: {
+      systemPromptFilePaths: config.systemPromptFilePaths,
+      sdkMode: config.sdkMode,
+      ...(config.modelSelection ? { modelSelection: config.modelSelection } : {}),
+      ...(config.tools ? { tools: config.tools } : {}),
+      ...(config.sdkOptions ? { sdkOptions: config.sdkOptions } : {}),
+    },
+  });
 
   return { layout, config };
 }
 
-export async function readSessionConfig(cwd: string, sessionId: string): Promise<SessionSystemPromptsConfig> {
+export async function readSessionConfig(cwd: string, sessionId: string): Promise<SessionSystemConfig> {
   const layout = createSessionLayout(cwd, sessionId);
-  if (!existsSync(layout.systemPromptsPath)) {
+  if (existsSync(layout.systemConfigPath)) {
+    const raw = await readFile(layout.systemConfigPath, "utf-8");
+    return JSON.parse(raw) as SessionSystemConfig;
+  }
+  const legacy = await readLegacySystemConfig(layout);
+  if (!legacy) {
     throw new Error(`Session not found: ${sessionId}`);
   }
-  const raw = await readFile(layout.systemPromptsPath, "utf-8");
-  return JSON.parse(raw) as SessionSystemPromptsConfig;
+  return legacy;
 }
 
-export async function writeSessionConfig(cwd: string, config: SessionSystemPromptsConfig): Promise<void> {
+export async function writeSessionConfig(cwd: string, config: SessionSystemConfig): Promise<void> {
   const layout = createSessionLayout(cwd, config.sessionId);
-  const nextConfig = {
+  const nextConfig: SessionSystemConfig = {
     ...config,
     updatedAt: nowIso(),
   };
   await mkdir(layout.rootDir, { recursive: true });
-  await writeFile(layout.systemPromptsPath, JSON.stringify(nextConfig, null, 2) + "\n", "utf-8");
+  await writeFile(layout.systemConfigPath, JSON.stringify(nextConfig, null, 2) + "\n", "utf-8");
 }
 
 export async function updateSessionConfig(
@@ -246,9 +385,9 @@ export async function updateSessionConfig(
     tools?: SubagentToolSelection;
     sdkOptions?: StandaloneSdkOptions;
   },
-): Promise<SessionSystemPromptsConfig> {
+): Promise<SessionSystemConfig> {
   const current = await readSessionConfig(cwd, sessionId);
-  const nextConfig: SessionSystemPromptsConfig = {
+  const nextConfig: SessionSystemConfig = {
     ...current,
     ...(patch.systemPromptFilePaths ? { systemPromptFilePaths: [...patch.systemPromptFilePaths] } : {}),
     ...(patch.sdkMode ? { sdkMode: patch.sdkMode } : {}),
@@ -257,16 +396,27 @@ export async function updateSessionConfig(
     ...(patch.sdkOptions ? { sdkOptions: patch.sdkOptions } : {}),
   };
   await writeSessionConfig(cwd, nextConfig);
-  return readSessionConfig(cwd, sessionId);
+  const updated = await readSessionConfig(cwd, sessionId);
+  await appendSessionEvent(cwd, sessionId, {
+    type: "session_config_updated",
+    payload: {
+      ...(patch.systemPromptFilePaths ? { systemPromptFilePaths: patch.systemPromptFilePaths } : {}),
+      ...(patch.sdkMode ? { sdkMode: patch.sdkMode } : {}),
+      ...(patch.modelSelection ? { modelSelection: patch.modelSelection } : {}),
+      ...(patch.tools ? { tools: patch.tools } : {}),
+      ...(patch.sdkOptions ? { sdkOptions: patch.sdkOptions } : {}),
+    },
+  });
+  return updated;
 }
 
-export async function listSessions(cwd: string): Promise<SessionSystemPromptsConfig[]> {
+export async function listSessions(cwd: string): Promise<SessionSystemConfig[]> {
   const rootDir = createSessionsRootDir(cwd);
   if (!existsSync(rootDir)) {
     return [];
   }
   const entries = await readdir(rootDir, { withFileTypes: true });
-  const sessions: SessionSystemPromptsConfig[] = [];
+  const sessions: SessionSystemConfig[] = [];
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     try {
@@ -276,44 +426,6 @@ export async function listSessions(cwd: string): Promise<SessionSystemPromptsCon
     }
   }
   return sessions.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-}
-
-export async function mountContext(
-  cwd: string,
-  sessionId: string,
-  sources: ContextSource[],
-  metadata?: Record<string, unknown>,
-): Promise<ContextMount> {
-  const config = await readSessionConfig(cwd, sessionId);
-  const mount: ContextMount = {
-    id: `mount-${randomUUID()}`,
-    createdAt: nowIso(),
-    sources,
-    ...(metadata ? { metadata } : {}),
-  };
-  config.mounts.push(mount);
-  await writeSessionConfig(cwd, config);
-  return mount;
-}
-
-export async function unmountContext(
-  cwd: string,
-  sessionId: string,
-  mountIds: string[],
-): Promise<{ removedIds: string[] }> {
-  const config = await readSessionConfig(cwd, sessionId);
-  const before = config.mounts.length;
-  config.mounts = config.mounts.filter(mount => !mountIds.includes(mount.id));
-  await writeSessionConfig(cwd, config);
-  const removedIds = before === config.mounts.length
-    ? []
-    : mountIds.filter(id => !config.mounts.find(mount => mount.id === id));
-  return { removedIds };
-}
-
-export async function listContextMounts(cwd: string, sessionId: string): Promise<ContextMount[]> {
-  const config = await readSessionConfig(cwd, sessionId);
-  return [...config.mounts];
 }
 
 export async function readMessages(cwd: string, sessionId: string): Promise<SessionMessageRecord[]> {
@@ -328,126 +440,329 @@ export async function readFileCalls(cwd: string, sessionId: string): Promise<Ses
   return readJsonl<SessionFileCallRecord>(createSessionLayout(cwd, sessionId).fileCallsPath);
 }
 
-export async function readTasks(cwd: string, sessionId: string): Promise<SessionTaskRecord[]> {
-  return readJsonl<SessionTaskRecord>(createSessionLayout(cwd, sessionId).tasksPath);
-}
-
 export async function readEvents(cwd: string, sessionId: string): Promise<SessionEventRecord[]> {
   return readJsonl<SessionEventRecord>(createSessionLayout(cwd, sessionId).eventsPath);
 }
 
 export async function getNextMessageSequence(cwd: string, sessionId: string): Promise<number> {
-  const messages = await readMessages(cwd, sessionId);
-  const maxSequence = messages.reduce((max, message) => Math.max(max, message.sequence), 0);
-  return maxSequence + 1;
+  return getNextSeq(createSessionLayout(cwd, sessionId).messagesPath);
 }
 
 export async function appendSessionMessage(
   cwd: string,
   sessionId: string,
-  record: Omit<SessionMessageRecord, "sessionId" | "createdAt">,
+  record: Omit<SessionMessageRecord, "seq"> & { seq?: number },
 ): Promise<SessionMessageRecord> {
-  const fullRecord: SessionMessageRecord = {
-    ...record,
-    sessionId,
-    createdAt: nowIso(),
-  };
-  await appendJsonl(createSessionLayout(cwd, sessionId).messagesPath, fullRecord);
-  return fullRecord;
+  const layout = createSessionLayout(cwd, sessionId);
+  return withFileLock(layout.messagesPath, async () => {
+    const fullRecord: SessionMessageRecord = {
+      ...record,
+      seq: record.seq ?? await getNextSeq(layout.messagesPath),
+    };
+    await appendJsonl(layout.messagesPath, fullRecord);
+    return fullRecord;
+  });
 }
 
 export async function appendSessionToolCall(
   cwd: string,
   sessionId: string,
-  record: Omit<SessionToolCallRecord, "sessionId" | "createdAt">,
+  record: Omit<SessionToolCallRecord, "seq"> & { seq?: number },
 ): Promise<SessionToolCallRecord> {
-  const fullRecord: SessionToolCallRecord = {
-    ...record,
-    sessionId,
-    createdAt: nowIso(),
-  };
-  await appendJsonl(createSessionLayout(cwd, sessionId).toolCallsPath, fullRecord);
-  return fullRecord;
+  const layout = createSessionLayout(cwd, sessionId);
+  return withFileLock(layout.toolCallsPath, async () => {
+    const fullRecord: SessionToolCallRecord = {
+      ...record,
+      seq: record.seq ?? await getNextSeq(layout.toolCallsPath),
+    };
+    await appendJsonl(layout.toolCallsPath, fullRecord);
+    return fullRecord;
+  });
 }
 
 export async function appendSessionFileCall(
   cwd: string,
   sessionId: string,
-  record: Omit<SessionFileCallRecord, "sessionId" | "createdAt">,
+  record: Omit<SessionFileCallRecord, "seq"> & { seq?: number },
 ): Promise<SessionFileCallRecord> {
-  const fullRecord: SessionFileCallRecord = {
-    ...record,
-    sessionId,
-    createdAt: nowIso(),
-  };
-  await appendJsonl(createSessionLayout(cwd, sessionId).fileCallsPath, fullRecord);
-  return fullRecord;
+  const layout = createSessionLayout(cwd, sessionId);
+  return withFileLock(layout.fileCallsPath, async () => {
+    const fullRecord: SessionFileCallRecord = {
+      ...record,
+      seq: record.seq ?? await getNextSeq(layout.fileCallsPath),
+    };
+    await appendJsonl(layout.fileCallsPath, fullRecord);
+    return fullRecord;
+  });
 }
 
 export async function appendSessionEvent(
   cwd: string,
   sessionId: string,
-  record: Omit<SessionEventRecord, "createdAt" | "id" | "sessionId">,
+  record: Omit<SessionEventRecord, "seq" | "createdAt"> & { seq?: number },
 ): Promise<SessionEventRecord> {
-  const fullRecord: SessionEventRecord = {
-    ...record,
-    id: `event-${randomUUID()}`,
-    sessionId,
-    createdAt: nowIso(),
-  };
-  await appendJsonl(createSessionLayout(cwd, sessionId).eventsPath, fullRecord);
-  return fullRecord;
-}
-
-export async function createSessionTask(
-  cwd: string,
-  sessionId: string,
-  input: CreateTaskInput,
-): Promise<SessionTaskRecord> {
-  await readSessionConfig(cwd, sessionId);
   const layout = createSessionLayout(cwd, sessionId);
-  return withFileLock(layout.tasksPath, async () => {
-    const tasks = await readJsonl<SessionTaskRecord>(layout.tasksPath);
-    const task: SessionTaskRecord = {
-      id: input.taskId,
-      sessionId,
-      inputText: input.inputText,
-      ...(input.temporarySources ? { temporarySources: input.temporarySources } : {}),
-      status: "queued",
-      registeredAt: nowIso(),
-      ...(input.archiveEnabled !== undefined ? { archiveEnabled: input.archiveEnabled } : {}),
-      ...(input.metadata ? { metadata: input.metadata } : {}),
+  return withFileLock(layout.eventsPath, async () => {
+    const fullRecord: SessionEventRecord = {
+      ...record,
+      seq: record.seq ?? await getNextSeq(layout.eventsPath),
+      createdAt: nowIso(),
     };
-    tasks.push(task);
-    await writeJsonl(layout.tasksPath, tasks);
-    return task;
+    await appendJsonl(layout.eventsPath, fullRecord);
+    return fullRecord;
   });
 }
 
-export async function updateSessionTask(
+export async function removeSessionMessagesBySeq(
   cwd: string,
   sessionId: string,
-  taskId: string,
-  updater: (task: SessionTaskRecord) => SessionTaskRecord,
-): Promise<SessionTaskRecord> {
+  seqs: number[],
+): Promise<void> {
+  if (seqs.length === 0) {
+    return;
+  }
   const layout = createSessionLayout(cwd, sessionId);
-  return withFileLock(layout.tasksPath, async () => {
-    const tasks = await readJsonl<SessionTaskRecord>(layout.tasksPath);
-    const index = tasks.findIndex(task => task.id === taskId);
-    if (index === -1) {
-      throw new Error(`Task not found: ${taskId}`);
-    }
-    tasks[index] = updater(tasks[index]!);
-    await writeJsonl(layout.tasksPath, tasks);
-    return tasks[index]!;
+  const seqSet = new Set(seqs);
+  await withFileLock(layout.messagesPath, async () => {
+    const records = await readJsonl<SessionMessageRecord>(layout.messagesPath);
+    await rewriteJsonlRecords(layout.messagesPath, records.filter(record => !seqSet.has(record.seq)));
   });
 }
 
-export async function getSessionTask(
+export async function removeSessionFileCallsBySeq(
   cwd: string,
   sessionId: string,
-  taskId: string,
-): Promise<SessionTaskRecord | undefined> {
-  const tasks = await readTasks(cwd, sessionId);
-  return tasks.find(task => task.id === taskId);
+  seqs: number[],
+): Promise<void> {
+  if (seqs.length === 0) {
+    return;
+  }
+  const layout = createSessionLayout(cwd, sessionId);
+  const seqSet = new Set(seqs);
+  await withFileLock(layout.fileCallsPath, async () => {
+    const records = await readJsonl<SessionFileCallRecord>(layout.fileCallsPath);
+    await rewriteJsonlRecords(layout.fileCallsPath, records.filter(record => !seqSet.has(record.seq)));
+  });
+}
+
+export async function listContextMounts(cwd: string, sessionId: string): Promise<ContextMount[]> {
+  const events = await readEvents(cwd, sessionId);
+  const mounts = new Map<number, ContextMount>();
+  for (const event of events) {
+    if (event.type === "manual_mount") {
+      const mount = parseContextMount(event.payload);
+      if (mount) {
+        mounts.set(mount.id, mount);
+      }
+    }
+    if (event.type === "manual_unmount" && Array.isArray(event.payload.removedMountIds)) {
+      for (const rawId of event.payload.removedMountIds) {
+        const mountId = Number(rawId);
+        if (Number.isInteger(mountId)) {
+          mounts.delete(mountId);
+        }
+      }
+    }
+  }
+  return [...mounts.values()].sort((a, b) => a.id - b.id);
+}
+
+export async function mountContext(
+  cwd: string,
+  sessionId: string,
+  input: { sources?: ContextSource[]; seqRanges?: number[][]; metadata?: Record<string, unknown> },
+): Promise<ContextMount> {
+  await readSessionConfig(cwd, sessionId);
+  const currentMounts = await listContextMounts(cwd, sessionId);
+  const seqRanges = normalizeRanges(input.seqRanges);
+  const sources = input.sources?.length ? input.sources : undefined;
+  if (!sources?.length && seqRanges.length === 0) {
+    throw new Error("A context mount requires either sources or seqRanges");
+  }
+  const mount: ContextMount = {
+    id: currentMounts.reduce((max, item) => Math.max(max, item.id), 0) + 1,
+    ...(sources ? { sources } : {}),
+    ...(seqRanges.length ? { seqRanges } : {}),
+    ...(input.metadata ? { metadata: input.metadata } : {}),
+  };
+  await appendSessionEvent(cwd, sessionId, {
+    type: "manual_mount",
+    payload: { mount },
+  });
+  return mount;
+}
+
+export async function unmountContext(
+  cwd: string,
+  sessionId: string,
+  input: { seqRanges?: number[][]; mountIds?: Array<string | number> },
+): Promise<{ removedIds: number[]; removedSeqs: number[] }> {
+  await readSessionConfig(cwd, sessionId);
+  const activeMounts = await listContextMounts(cwd, sessionId);
+  const messages = await readMessages(cwd, sessionId);
+  const currentState = await readCurrentContextState(cwd, sessionId);
+  const messagesBySeq = new Map(messages.map(message => [message.seq, message]));
+  const childrenByParent = buildChildrenMap(messages);
+  const activeSeqSet = new Set(currentState.activeMessageSeqs);
+
+  const requestedIds = (input.mountIds ?? [])
+    .map(value => Number(value))
+    .filter(value => Number.isInteger(value));
+  const activeMountMap = new Map(activeMounts.map(mount => [mount.id, mount]));
+  const removedIds = requestedIds.filter(id => activeMountMap.has(id));
+
+  const seqRanges = normalizeRanges(input.seqRanges);
+  const removedSeqSet = new Set<number>();
+
+  if (seqRanges.length > 0) {
+    for (const seq of removeSeqsAndDescendants(activeSeqSet, seqRanges, messagesBySeq, childrenByParent)) {
+      removedSeqSet.add(seq);
+    }
+  }
+
+  for (const mountId of removedIds) {
+    const mount = activeMountMap.get(mountId);
+    if (!mount?.seqRanges?.length) {
+      continue;
+    }
+    for (const seq of removeSeqsAndDescendants(activeSeqSet, mount.seqRanges, messagesBySeq, childrenByParent)) {
+      removedSeqSet.add(seq);
+    }
+  }
+
+  if (removedIds.length > 0 || removedSeqSet.size > 0) {
+    await appendSessionEvent(cwd, sessionId, {
+      type: "manual_unmount",
+      payload: {
+        ...(removedIds.length > 0 ? { removedMountIds: removedIds } : {}),
+        ...(removedSeqSet.size > 0 ? { seqRanges: toNumberRanges([...removedSeqSet]) } : {}),
+      },
+    });
+  }
+
+  return {
+    removedIds,
+    removedSeqs: [...removedSeqSet].sort((a, b) => a - b),
+  };
+}
+
+export async function readLatestSendSnapshot(
+  cwd: string,
+  sessionId: string,
+): Promise<{ activeMessageSeqs: number[]; lastInputSeq?: number; lastParentSeq?: number; lastRequestKey?: string }> {
+  const events = await readEvents(cwd, sessionId);
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]!;
+    if (event.type !== "send_finished") {
+      continue;
+    }
+    return {
+      activeMessageSeqs: fromNumberRanges(event.payload.activeMessageSeqRanges),
+      ...(Number.isInteger(Number(event.payload.inputSeq)) ? { lastInputSeq: Number(event.payload.inputSeq) } : {}),
+      ...(Number.isInteger(Number(event.payload.parentSeq)) ? { lastParentSeq: Number(event.payload.parentSeq) } : {}),
+      ...(typeof event.requestKey === "string" ? { lastRequestKey: event.requestKey } : {}),
+    };
+  }
+  return { activeMessageSeqs: [] };
+}
+
+export async function readCurrentContextState(
+  cwd: string,
+  sessionId: string,
+): Promise<{ activeMessageSeqs: number[]; activeMounts: ContextMount[]; lastInputSeq?: number; lastParentSeq?: number }> {
+  const [messages, events, activeMounts] = await Promise.all([
+    readMessages(cwd, sessionId),
+    readEvents(cwd, sessionId),
+    listContextMounts(cwd, sessionId),
+  ]);
+  const messagesBySeq = new Map(messages.map(message => [message.seq, message]));
+  const childrenByParent = buildChildrenMap(messages);
+
+  let activeSeqSet = new Set<number>();
+  let lastInputSeq: number | undefined;
+  let lastParentSeq: number | undefined;
+  let lastSendIndex = -1;
+
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]!;
+    if (event.type !== "send_finished") {
+      continue;
+    }
+    activeSeqSet = new Set(
+      fromNumberRanges(event.payload.activeMessageSeqRanges)
+        .filter(seq => !isSystemPromptMessage(messagesBySeq.get(seq))),
+    );
+    if (Number.isInteger(Number(event.payload.inputSeq))) {
+      lastInputSeq = Number(event.payload.inputSeq);
+    }
+    if (Number.isInteger(Number(event.payload.parentSeq))) {
+      lastParentSeq = Number(event.payload.parentSeq);
+    }
+    lastSendIndex = index;
+    break;
+  }
+
+  const postSendSeqMounts = new Map<number, ContextMount>();
+  for (let index = lastSendIndex + 1; index < events.length; index += 1) {
+    const event = events[index]!;
+    if (event.type === "manual_mount") {
+      const mount = parseContextMount(event.payload);
+      if (!mount) {
+        continue;
+      }
+      if (mount.seqRanges?.length) {
+        for (const seq of fromNumberRanges(mount.seqRanges)) {
+          const message = messagesBySeq.get(seq);
+          if (message && !isSystemPromptMessage(message)) {
+            activeSeqSet.add(seq);
+          }
+        }
+        postSendSeqMounts.set(mount.id, mount);
+      }
+      continue;
+    }
+
+    if (event.type === "manual_unmount") {
+      const eventRanges = normalizeRanges(event.payload.seqRanges);
+      if (eventRanges.length > 0) {
+        removeSeqsAndDescendants(activeSeqSet, eventRanges, messagesBySeq, childrenByParent);
+      }
+      if (Array.isArray(event.payload.removedMountIds)) {
+        for (const rawId of event.payload.removedMountIds) {
+          const mountId = Number(rawId);
+          if (!Number.isInteger(mountId)) {
+            continue;
+          }
+          const mounted = postSendSeqMounts.get(mountId);
+          if (mounted?.seqRanges?.length) {
+            removeSeqsAndDescendants(activeSeqSet, mounted.seqRanges, messagesBySeq, childrenByParent);
+          }
+          postSendSeqMounts.delete(mountId);
+        }
+      }
+    }
+  }
+
+  return {
+    activeMessageSeqs: [...activeSeqSet].sort((a, b) => a - b),
+    activeMounts,
+    ...(lastInputSeq !== undefined ? { lastInputSeq } : {}),
+    ...(lastParentSeq !== undefined ? { lastParentSeq } : {}),
+  };
+}
+
+export async function getCurrentParentSequence(cwd: string, sessionId: string): Promise<number | undefined> {
+  const state = await readCurrentContextState(cwd, sessionId);
+  if (state.activeMessageSeqs.length === 0) {
+    return undefined;
+  }
+  return state.activeMessageSeqs[state.activeMessageSeqs.length - 1];
+}
+
+export function compressMessageSequences(seqs: number[]): number[][] {
+  return toNumberRanges(seqs);
+}
+
+export function expandMessageSequenceRanges(ranges: unknown): number[] {
+  return fromNumberRanges(ranges);
 }

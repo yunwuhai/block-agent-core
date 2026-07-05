@@ -2,12 +2,11 @@ import { afterAll, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { registerBlockAgentCoreTool } from "./block-agent-core.ts";
-import { handleSendTask } from "./actions/send-task.ts";
-import { handleGetTask } from "./actions/send-task.ts";
+import { handleSendMessage } from "./actions/send-task.ts";
 import { handleReadEvents } from "./actions/read-events.ts";
 import { handleCreateSession } from "./actions/create-session.ts";
 import { handleUpdateSession } from "./actions/update-session.ts";
-import { handleMountContext } from "./actions/context-mounts.ts";
+import { handleListContextMounts, handleMountContext, handleUnmountContext } from "./actions/context-mounts.ts";
 import { readJsonl } from "../utils/jsonl.ts";
 import { TaskScheduler, resetDefaultTaskSchedulerForTests } from "../core/task-scheduler.ts";
 
@@ -22,6 +21,17 @@ function createCtx() {
       find: () => ({ provider: "deepseek", id: "deepseek-v4-flash", name: "DeepSeek V4 Flash", reasoning: true, input: ["text"] }),
     },
   } as any;
+}
+
+async function waitForSendFinish(sessionId: string, requestKey: string): Promise<void> {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const eventsResult = await handleReadEvents({ sessionId, requestKey }, createCtx());
+    if (eventsResult.content[0]!.text.includes("send_finished")) {
+      return;
+    }
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  throw new Error(`send did not finish in time: ${sessionId}/${requestKey}`);
 }
 
 beforeEach(() => {
@@ -67,13 +77,14 @@ describe("session-first actions", () => {
 
     expect(result.content[0]!.text).toContain("Created session");
     const sessionDir = join(tmpDir, ".block-agent-core", "sessions", "session-a");
-    expect(readFileSync(join(sessionDir, "system-prompts.json"), "utf-8")).toContain("\"sdkMode\": \"host-inherit\"");
+    expect(readFileSync(join(sessionDir, "system-config.json"), "utf-8")).toContain("\"sdkMode\": \"host-inherit\"");
     expect(readFileSync(join(sessionDir, "messages.jsonl"), "utf-8")).toBe("");
     expect(readFileSync(join(sessionDir, "tool-calls.jsonl"), "utf-8")).toBe("");
     expect(readFileSync(join(sessionDir, "file-calls.jsonl"), "utf-8")).toBe("");
+    expect(readFileSync(join(sessionDir, "events.jsonl"), "utf-8")).toContain("session_initialized");
   });
 
-  it("updates a session config without clearing mounts", async () => {
+  it("updates a session config while keeping mounts in event state", async () => {
     const promptPathA = join(tmpDir, "prompt-update-a.md");
     const promptPathB = join(tmpDir, "prompt-update-b.md");
     const notePath = join(tmpDir, "note-update.md");
@@ -105,14 +116,17 @@ describe("session-first actions", () => {
     expect(result.content[0]!.text).toContain("\"grep\"");
 
     const sessionDir = join(tmpDir, ".block-agent-core", "sessions", "session-update");
-    const config = JSON.parse(readFileSync(join(sessionDir, "system-prompts.json"), "utf-8"));
+    const config = JSON.parse(readFileSync(join(sessionDir, "system-config.json"), "utf-8"));
     expect(config.systemPromptFilePaths).toEqual([promptPathA, promptPathB]);
-    expect(config.mounts).toHaveLength(1);
     expect(config.tools).toEqual({ names: ["grep"] });
-    expect(config.modelSelection).toEqual({ strategy: "specific", provider: "deepseek", modelId: "deepseek-v4-pro" });
+
+    const mountsResult = JSON.parse((await handleListContextMounts({
+      sessionId: "session-update",
+    }, createCtx())).content[0]!.text);
+    expect(mountsResult.mounts).toHaveLength(1);
   });
 
-  it("mounts context and runs a task with archived reply, tool calls, file calls, and events", async () => {
+  it("runs a send with system prompts, merged tool messages, file calls, and events", async () => {
     const promptPath = join(tmpDir, "task-prompt.md");
     const notePath = join(tmpDir, "note.md");
     writeFileSync(promptPath, "You are a coding session.", "utf-8");
@@ -131,9 +145,9 @@ describe("session-first actions", () => {
     } as any, createCtx());
 
     const scheduler = new TaskScheduler(8);
-    await handleSendTask({
+    await handleSendMessage({
       sessionId: "session-b",
-      taskId: "task-1",
+      requestKey: "send-1",
       inputText: "Investigate the issue",
     }, createCtx(), {
       scheduler,
@@ -167,21 +181,112 @@ describe("session-first actions", () => {
       }),
     });
 
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await waitForSendFinish("session-b", "send-1");
 
-    const taskResult = await handleGetTask({ sessionId: "session-b", taskId: "task-1" }, createCtx());
-    expect(taskResult.content[0]!.text).toContain("\"status\": \"completed\"");
-
-    const eventsResult = await handleReadEvents({ sessionId: "session-b" }, createCtx());
-    expect(eventsResult.content[0]!.text).toContain("task_completed");
+    const eventsResult = await handleReadEvents({ sessionId: "session-b", requestKey: "send-1" }, createCtx());
+    expect(eventsResult.content[0]!.text).toContain("send_finished");
 
     const sessionDir = join(tmpDir, ".block-agent-core", "sessions", "session-b");
-    const messages = await readJsonl<{ kind: string }>(join(sessionDir, "messages.jsonl"));
-    expect(messages.map(item => item.kind)).toEqual(["reasoning", "tool_call", "file_call", "reply"]);
+    const messages = await readJsonl<{ kind: string; text?: string }>(join(sessionDir, "messages.jsonl"));
+    expect(messages.map(item => item.kind)).toEqual(["system_prompt", "input", "reasoning", "tool_call", "file_call", "reply"]);
+    expect(messages[0]!.text).toContain("You are a coding session.");
+
     const toolCalls = await readJsonl<{ toolName: string }>(join(sessionDir, "tool-calls.jsonl"));
     expect(toolCalls[0]!.toolName).toBe("read");
     const fileCalls = await readJsonl<{ filePath: string }>(join(sessionDir, "file-calls.jsonl"));
     expect(fileCalls.some(item => item.filePath === notePath)).toBe(true);
+    expect(fileCalls.some(item => item.filePath === promptPath)).toBe(true);
+  });
+
+  it("supports seq-range unmount and remount", async () => {
+    const promptPath = join(tmpDir, "prompt-range.md");
+    writeFileSync(promptPath, "Prompt", "utf-8");
+
+    await handleCreateSession({
+      sessionId: "session-range",
+      systemPromptFilePaths: [promptPath],
+      sdkMode: "host-inherit",
+      tools: { names: ["read"] },
+    }, createCtx());
+
+    const { appendSessionMessage, appendSessionEvent } = await import("../core/session-store.ts");
+    await appendSessionMessage(tmpDir, "session-range", { seq: 1, kind: "system_prompt", text: "Prompt" });
+    await appendSessionMessage(tmpDir, "session-range", { seq: 2, kind: "input", text: "A", parentSeq: 1 });
+    await appendSessionMessage(tmpDir, "session-range", { seq: 3, kind: "reply", text: "B", parentSeq: 2 });
+    await appendSessionMessage(tmpDir, "session-range", { seq: 4, kind: "reply", text: "C", parentSeq: 3 });
+    await appendSessionMessage(tmpDir, "session-range", { seq: 5, kind: "reply", text: "D", parentSeq: 4 });
+    await appendSessionEvent(tmpDir, "session-range", {
+      type: "send_finished",
+      payload: { activeMessageSeqRanges: [[2, 5]] },
+    });
+
+    const unmountResult = await handleUnmountContext({
+      sessionId: "session-range",
+      seqRanges: [[3, 4]],
+    }, createCtx());
+    expect(unmountResult.content[0]!.text).toContain("Updated active context");
+
+    const afterUnmount = JSON.parse((await handleListContextMounts({ sessionId: "session-range" }, createCtx())).content[0]!.text);
+    expect(afterUnmount.activeMessageSeqs).toEqual([2]);
+
+    await handleMountContext({
+      sessionId: "session-range",
+      seqRanges: [[3, 4]],
+    }, createCtx());
+
+    const afterRemount = JSON.parse((await handleListContextMounts({ sessionId: "session-range" }, createCtx())).content[0]!.text);
+    expect(afterRemount.activeMessageSeqs).toEqual([2, 3, 4]);
+  });
+
+  it("rolls back provisional messages after a failed send retry", async () => {
+    const promptPath = join(tmpDir, "prompt-fail-retry.md");
+    writeFileSync(promptPath, "Prompt", "utf-8");
+
+    await handleCreateSession({
+      sessionId: "session-fail-retry",
+      systemPromptFilePaths: [promptPath],
+      sdkMode: "host-inherit",
+      tools: { names: ["read"] },
+    }, createCtx());
+
+    const scheduler = new TaskScheduler(8);
+    const failingDeps = {
+      scheduler,
+      composeContextText: async () => "",
+      runWithSdk: async () => {
+        throw new Error("sdk bootstrap failed");
+      },
+    };
+
+    await handleSendMessage({
+      sessionId: "session-fail-retry",
+      requestKey: "send-1",
+      inputText: "first try",
+    }, createCtx(), failingDeps);
+    await waitForSendFinish("session-fail-retry", "send-1");
+
+    const sessionDir = join(tmpDir, ".block-agent-core", "sessions", "session-fail-retry");
+    const messagesAfterFirstFail = await readJsonl<{ seq: number; kind: string }>(join(sessionDir, "messages.jsonl"));
+    const fileCallsAfterFirstFail = await readJsonl<{ seq: number; filePath: string }>(join(sessionDir, "file-calls.jsonl"));
+    expect(messagesAfterFirstFail).toEqual([]);
+    expect(fileCallsAfterFirstFail).toEqual([]);
+
+    await handleSendMessage({
+      sessionId: "session-fail-retry",
+      requestKey: "send-2",
+      inputText: "second try",
+    }, createCtx(), failingDeps);
+    await waitForSendFinish("session-fail-retry", "send-2");
+
+    const messagesAfterSecondFail = await readJsonl<{ seq: number; kind: string }>(join(sessionDir, "messages.jsonl"));
+    const fileCallsAfterSecondFail = await readJsonl<{ seq: number; filePath: string }>(join(sessionDir, "file-calls.jsonl"));
+    expect(messagesAfterSecondFail).toEqual([]);
+    expect(fileCallsAfterSecondFail).toEqual([]);
+
+    const mountsState = JSON.parse((await handleListContextMounts({
+      sessionId: "session-fail-retry",
+    }, createCtx())).content[0]!.text);
+    expect(mountsState.activeMessageSeqs).toEqual([]);
   });
 });
 

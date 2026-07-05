@@ -56,10 +56,10 @@ describe("context sources", () => {
     const toolCallsPath = join(dir, "tool-calls.jsonl");
     const fileCallsPath = join(dir, "file-calls.jsonl");
 
-    await appendJsonl(messagesPath, { id: "m1", sequence: 1, kind: "tool_call", toolCallId: "call-1" });
-    await appendJsonl(messagesPath, { id: "m2", sequence: 2, kind: "file_call", fileCallId: "file-1" });
-    await appendJsonl(toolCallsPath, { id: "call-1", toolName: "read", params: { path: "/tmp/a.ts" }, result: { ok: true } });
-    await appendJsonl(fileCallsPath, { id: "file-1", filePath: "/tmp/a.ts", accessType: "read" });
+    await appendJsonl(messagesPath, { seq: 1, kind: "tool_call", toolCallSeq: 1 });
+    await appendJsonl(messagesPath, { seq: 2, kind: "file_call", fileCallSeq: 1 });
+    await appendJsonl(toolCallsPath, { seq: 1, toolName: "read", params: { path: "/tmp/a.ts" }, result: { ok: true } });
+    await appendJsonl(fileCallsPath, { seq: 1, filePath: "/tmp/a.ts" });
 
     const content = await loadContextSource({
       type: "jsonl-fields",
@@ -70,6 +70,7 @@ describe("context sources", () => {
     });
 
     expect(content).toContain("Tool: read");
+    expect(content).toContain("Result:");
     expect(content).toContain("File: /tmp/a.ts");
   });
 

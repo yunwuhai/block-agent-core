@@ -1,20 +1,21 @@
-import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { basename } from "node:path";
 import {
   appendSessionEvent,
   appendSessionFileCall,
   appendSessionMessage,
   appendSessionToolCall,
-  createSessionLayout,
-  getNextMessageSequence,
+  compressMessageSequences,
+  getCurrentParentSequence,
+  listContextMounts,
+  removeSessionFileCallsBySeq,
+  removeSessionMessagesBySeq,
+  readCurrentContextState,
   readFileCalls,
   readMessages,
   readSessionConfig,
   readToolCalls,
   type SessionFileCallRecord,
   type SessionMessageRecord,
-  type SessionTaskRecord,
 } from "./session-store.ts";
 import { composeContext, type ContextSource } from "./context-sources.ts";
 import { runSubagentWithPiSdk, type PiSdkRunOptions, type PiSdkRunResult } from "../adapter/pi-sdk.ts";
@@ -27,11 +28,30 @@ export interface SessionTaskRunnerDeps {
   runWithSdk: (options: PiSdkRunOptions) => Promise<PiSdkRunResult>;
 }
 
+export interface SessionSendRequest {
+  requestKey?: string;
+  inputText: string;
+  inputSeq: number;
+  parentSeq?: number;
+  systemPromptSeqs: number[];
+  temporarySources?: ContextSource[];
+  metadata?: Record<string, unknown>;
+}
+
 export interface SessionTaskExecutionResult {
-  taskId: string;
+  requestKey?: string;
   model: PiSdkRunResult["model"];
   tools: string[];
   prompt: string;
+  outputMessageSeqs: number[];
+  activeMessageSeqs: number[];
+}
+
+export interface CreatedInputArtifacts {
+  parentSeq?: number;
+  systemPromptSeqs: number[];
+  systemPromptFileCallSeqs: number[];
+  inputMessage: SessionMessageRecord;
 }
 
 const defaultDeps: SessionTaskRunnerDeps = {
@@ -49,105 +69,177 @@ function inferFilePath(params: unknown): string | undefined {
   return typeof candidate === "string" ? candidate : undefined;
 }
 
-function formatToolCallRecord(record: { toolName: string; params: unknown; result: unknown }): string {
+function formatToolCallMessage(record: { toolName: string; params: unknown; result: unknown; error?: boolean }): string {
   return [
     `Tool: ${record.toolName}`,
     `Params: ${JSON.stringify(record.params, null, 2)}`,
+    `Error: ${record.error ? "true" : "false"}`,
     `Result: ${JSON.stringify(record.result, null, 2)}`,
   ].join("\n");
 }
 
-function formatFileCallRecord(record: SessionFileCallRecord): string {
-  return [
-    `File: ${record.filePath}`,
-    `Access: ${record.accessType}`,
-    ...(record.toolCallId ? [`ToolCall: ${record.toolCallId}`] : []),
-  ].join("\n");
+function formatFileCallMessage(record: SessionFileCallRecord): string {
+  return `File: ${record.filePath}`;
 }
 
 function resolveExpandedMessageText(
   message: SessionMessageRecord,
-  toolCallsById: Map<string, { toolName: string; params: unknown; result: unknown }>,
-  fileCallsById: Map<string, SessionFileCallRecord>,
+  toolCallsBySeq: Map<number, { toolName: string; params: unknown; result: unknown; error?: boolean }>,
+  fileCallsBySeq: Map<number, SessionFileCallRecord>,
 ): string {
-  if (message.kind === "tool_call" && message.toolCallId) {
-    const toolCall = toolCallsById.get(message.toolCallId);
+  if (message.kind === "tool_call" && typeof message.toolCallSeq === "number") {
+    const toolCall = toolCallsBySeq.get(message.toolCallSeq);
     if (toolCall) {
-      return formatToolCallRecord(toolCall);
+      return formatToolCallMessage(toolCall);
     }
   }
-  if (message.kind === "file_call" && message.fileCallId) {
-    const fileCall = fileCallsById.get(message.fileCallId);
+  if (message.kind === "file_call" && typeof message.fileCallSeq === "number") {
+    const fileCall = fileCallsBySeq.get(message.fileCallSeq);
     if (fileCall) {
-      return formatFileCallRecord(fileCall);
+      return formatFileCallMessage(fileCall);
     }
   }
   return message.text ?? "";
 }
 
-async function buildSessionHistoryContext(cwd: string, sessionId: string): Promise<string> {
+async function buildSessionHistoryContext(cwd: string, sessionId: string): Promise<{ text: string; activeMessageSeqs: number[] }> {
+  const state = await readCurrentContextState(cwd, sessionId);
+  if (state.activeMessageSeqs.length === 0) {
+    return { text: "", activeMessageSeqs: [] };
+  }
   const [messages, toolCalls, fileCalls] = await Promise.all([
     readMessages(cwd, sessionId),
     readToolCalls(cwd, sessionId),
     readFileCalls(cwd, sessionId),
   ]);
-  const toolCallsById = new Map(toolCalls.map(record => [record.id, record]));
-  const fileCallsById = new Map(fileCalls.map(record => [record.id, record]));
-  return messages
-    .sort((a, b) => a.sequence - b.sequence)
-    .map(message => resolveExpandedMessageText(message, toolCallsById, fileCallsById))
-    .filter(text => text.trim().length > 0)
+  const activeSet = new Set(state.activeMessageSeqs);
+  const toolCallsBySeq = new Map(toolCalls.map(record => [record.seq, record]));
+  const fileCallsBySeq = new Map(fileCalls.map(record => [record.seq, record]));
+  const text = messages
+    .filter(message => activeSet.has(message.seq))
+    .sort((a, b) => a.seq - b.seq)
+    .map(message => resolveExpandedMessageText(message, toolCallsBySeq, fileCallsBySeq))
+    .filter(part => part.trim().length > 0)
     .join("\n\n");
+  return { text, activeMessageSeqs: state.activeMessageSeqs };
 }
 
-async function loadSystemPrompts(systemPromptFilePaths: string[]): Promise<string> {
-  const texts: string[] = [];
-  for (const filePath of systemPromptFilePaths) {
-    texts.push(await readFile(filePath, "utf-8"));
+export async function createInputMessage(
+  cwd: string,
+  sessionId: string,
+  inputText: string,
+  requestKey?: string,
+  metadata?: Record<string, unknown>,
+): Promise<CreatedInputArtifacts> {
+  const config = await readSessionConfig(cwd, sessionId);
+  let currentParentSeq = await getCurrentParentSequence(cwd, sessionId);
+  const systemPromptSeqs: number[] = [];
+  const systemPromptFileCallSeqs: number[] = [];
+
+  for (const filePath of config.systemPromptFilePaths) {
+    const text = await readFile(filePath, "utf-8");
+    const fileCall = await appendSessionFileCall(cwd, sessionId, {
+      filePath,
+      ...(requestKey ? { requestKey } : {}),
+      metadata: { kind: "system_prompt_source" },
+    });
+    systemPromptFileCallSeqs.push(fileCall.seq);
+    const message = await appendSessionMessage(cwd, sessionId, {
+      kind: "system_prompt",
+      text,
+      ...(currentParentSeq !== undefined ? { parentSeq: currentParentSeq } : {}),
+      ...(requestKey ? { requestKey } : {}),
+      fileCallSeq: fileCall.seq,
+      metadata: { sourceFilePath: filePath },
+    });
+    systemPromptSeqs.push(message.seq);
+    currentParentSeq = message.seq;
   }
-  return texts.join("\n\n");
+
+  const inputMessage = await appendSessionMessage(cwd, sessionId, {
+    kind: "input",
+    text: inputText,
+    ...(currentParentSeq !== undefined ? { parentSeq: currentParentSeq } : {}),
+    ...(requestKey ? { requestKey } : {}),
+    ...(metadata ? { metadata } : {}),
+  });
+
+  return {
+    ...(inputMessage.parentSeq !== undefined ? { parentSeq: inputMessage.parentSeq } : {}),
+    systemPromptSeqs,
+    systemPromptFileCallSeqs,
+    inputMessage,
+  };
+}
+
+export async function rollbackCreatedInputArtifacts(
+  cwd: string,
+  sessionId: string,
+  created: CreatedInputArtifacts,
+): Promise<void> {
+  await Promise.all([
+    removeSessionMessagesBySeq(cwd, sessionId, [...created.systemPromptSeqs, created.inputMessage.seq]),
+    removeSessionFileCallsBySeq(cwd, sessionId, created.systemPromptFileCallSeqs),
+  ]);
 }
 
 export async function executeSessionTask(
   cwd: string,
   sessionId: string,
-  task: SessionTaskRecord,
+  request: SessionSendRequest,
   ctx: ExtensionContextLike,
   deps: SessionTaskRunnerDeps = defaultDeps,
 ): Promise<SessionTaskExecutionResult> {
   const config = await readSessionConfig(cwd, sessionId);
-  const layout = createSessionLayout(cwd, sessionId);
+  const activeMounts = await listContextMounts(cwd, sessionId);
 
-  const [systemPrompt, mountedContext, historyContext, temporaryContext] = await Promise.all([
-    loadSystemPrompts(config.systemPromptFilePaths),
-    deps.composeContextText(config.mounts.flatMap(mount => mount.sources), "\n\n"),
+  const [mountedContext, historyContext, temporaryContext] = await Promise.all([
+    deps.composeContextText(
+      activeMounts
+        .filter(mount => mount.sources?.length)
+        .flatMap(mount => mount.sources ?? []),
+      "\n\n",
+    ),
     buildSessionHistoryContext(cwd, sessionId),
-    task.temporarySources?.length ? deps.composeContextText(task.temporarySources, "\n\n") : Promise.resolve(""),
+    request.temporarySources?.length ? deps.composeContextText(request.temporarySources, "\n\n") : Promise.resolve(""),
   ]);
 
-  for (const filePath of config.systemPromptFilePaths) {
-    await appendSessionFileCall(cwd, sessionId, {
-      id: `file-${randomUUID()}`,
-      taskId: task.id,
-      filePath,
-      accessType: "system-prompt",
-      metadata: { label: basename(filePath) },
-    });
-  }
+  const systemPromptMessages = await readMessages(cwd, sessionId);
+  const systemPromptText = systemPromptMessages
+    .filter(message => request.systemPromptSeqs.includes(message.seq))
+    .sort((a, b) => a.seq - b.seq)
+    .map(message => message.text ?? "")
+    .filter(Boolean)
+    .join("\n\n");
 
-  const context = [mountedContext, historyContext, temporaryContext]
+  const context = [mountedContext, historyContext.text, temporaryContext]
     .filter(part => part.trim().length > 0)
     .join("\n\n");
 
+  const sentMessageSeqs = [...request.systemPromptSeqs, ...historyContext.activeMessageSeqs, request.inputSeq];
+  await appendSessionEvent(cwd, sessionId, {
+    ...(request.requestKey ? { requestKey: request.requestKey } : {}),
+    type: "send_started",
+    payload: {
+      inputSeq: request.inputSeq,
+      ...(request.parentSeq !== undefined ? { parentSeq: request.parentSeq } : {}),
+      systemPromptSeqRanges: compressMessageSequences(request.systemPromptSeqs),
+      sentMessageSeqRanges: compressMessageSequences(sentMessageSeqs),
+      activeMountIds: activeMounts.map(mount => mount.id),
+    },
+  });
+
   const result = await deps.runWithSdk({
-    inputText: task.inputText,
+    inputText: request.inputText,
     context,
-    systemPrompt,
+    systemPrompt: systemPromptText,
     cwd,
     turnIdentity: {
       runId: sessionId,
-      keyParts: [task.id],
+      keyParts: [request.requestKey ?? `send-${request.inputSeq}`],
     },
+    ...(ctx.authStorage ? { authStorage: ctx.authStorage } : {}),
+    ...(ctx.piSdkModule ? { piSdkModule: ctx.piSdkModule } : {}),
     modelRegistry: ctx.modelRegistry,
     ...(ctx.model ? { currentModel: ctx.model } : {}),
     ...(config.modelSelection ? { modelSelection: config.modelSelection } : {}),
@@ -155,87 +247,87 @@ export async function executeSessionTask(
     sdkMode: config.sdkMode,
     ...(config.sdkOptions ? { sdkOptions: config.sdkOptions } : {}),
     onEvent: async (event) => {
-      if (event.type === "tool_call_started" || event.type === "tool_call_finished") {
+      if (event.type === "tool_call_started") {
         await appendSessionEvent(cwd, sessionId, {
-          taskId: task.id,
-          type: event.type,
+          ...(request.requestKey ? { requestKey: request.requestKey } : {}),
+          type: "tool_send_started",
+          payload: event.payload,
+        });
+      }
+      if (event.type === "tool_call_finished") {
+        await appendSessionEvent(cwd, sessionId, {
+          ...(request.requestKey ? { requestKey: request.requestKey } : {}),
+          type: "tool_send_finished",
           payload: event.payload,
         });
       }
     },
   });
 
-  let nextSequence = await getNextMessageSequence(cwd, sessionId);
+  const outputMessageSeqs: number[] = [];
+  let currentParentSeq = request.inputSeq;
 
-  await appendSessionMessage(cwd, sessionId, {
-    id: `${task.id}:reasoning`,
-    taskId: task.id,
-    sequence: nextSequence++,
+  const reasoningMessage = await appendSessionMessage(cwd, sessionId, {
     kind: "reasoning",
     text: result.reasoningText,
+    parentSeq: currentParentSeq,
+    ...(request.requestKey ? { requestKey: request.requestKey } : {}),
   });
+  outputMessageSeqs.push(reasoningMessage.seq);
+  currentParentSeq = reasoningMessage.seq;
 
   for (const trace of result.toolCalls) {
-    await appendSessionToolCall(cwd, sessionId, {
-      id: trace.id,
-      taskId: task.id,
-      messageId: `${task.id}:tool:${trace.id}`,
+    const toolCallRecord = await appendSessionToolCall(cwd, sessionId, {
       toolName: trace.toolName,
       params: trace.params,
       result: trace.result,
       error: Boolean(trace.metadata?.isError),
+      ...(request.requestKey ? { requestKey: request.requestKey } : {}),
       ...(trace.metadata ? { metadata: trace.metadata } : {}),
     });
-    await appendSessionMessage(cwd, sessionId, {
-      id: `${task.id}:tool:${trace.id}`,
-      taskId: task.id,
-      sequence: nextSequence++,
+
+    const toolCallMessage = await appendSessionMessage(cwd, sessionId, {
       kind: "tool_call",
-      toolCallId: trace.id,
+      parentSeq: currentParentSeq,
+      ...(request.requestKey ? { requestKey: request.requestKey } : {}),
+      toolCallSeq: toolCallRecord.seq,
     });
+    outputMessageSeqs.push(toolCallMessage.seq);
+    currentParentSeq = toolCallMessage.seq;
 
     const filePath = inferFilePath(trace.params);
     if (filePath && isFileAccessTool(trace.toolName)) {
-      const fileCallId = `file-${randomUUID()}`;
-      await appendSessionFileCall(cwd, sessionId, {
-        id: fileCallId,
-        taskId: task.id,
-        toolCallId: trace.id,
+      const fileCallRecord = await appendSessionFileCall(cwd, sessionId, {
         filePath,
-        accessType: trace.toolName as "read" | "write" | "edit",
+        ...(request.requestKey ? { requestKey: request.requestKey } : {}),
       });
-      await appendSessionMessage(cwd, sessionId, {
-        id: `${task.id}:file:${fileCallId}`,
-        taskId: task.id,
-        sequence: nextSequence++,
+      const fileCallMessage = await appendSessionMessage(cwd, sessionId, {
         kind: "file_call",
-        fileCallId,
+        parentSeq: currentParentSeq,
+        ...(request.requestKey ? { requestKey: request.requestKey } : {}),
+        fileCallSeq: fileCallRecord.seq,
       });
+      outputMessageSeqs.push(fileCallMessage.seq);
+      currentParentSeq = fileCallMessage.seq;
     }
   }
 
-  await appendSessionMessage(cwd, sessionId, {
-    id: `${task.id}:reply`,
-    taskId: task.id,
-    sequence: nextSequence,
+  const replyMessage = await appendSessionMessage(cwd, sessionId, {
     kind: "reply",
     text: result.replyText,
+    parentSeq: currentParentSeq,
+    ...(request.requestKey ? { requestKey: request.requestKey } : {}),
   });
+  outputMessageSeqs.push(replyMessage.seq);
 
-  await appendSessionEvent(cwd, sessionId, {
-    taskId: task.id,
-    type: "task_artifacts_written",
-    payload: {
-      messagesPath: layout.messagesPath,
-      toolCallsPath: layout.toolCallsPath,
-      fileCallsPath: layout.fileCallsPath,
-    },
-  });
+  const activeMessageSeqs = [...historyContext.activeMessageSeqs, request.inputSeq, ...outputMessageSeqs];
 
   return {
-    taskId: task.id,
+    ...(request.requestKey ? { requestKey: request.requestKey } : {}),
     model: result.model,
     tools: result.tools,
     prompt: result.prompt,
+    outputMessageSeqs,
+    activeMessageSeqs,
   };
 }

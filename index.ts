@@ -23,7 +23,6 @@ export { loadRecipes, getRecipe, addRecipe, updateRecipe } from "./core/recipes.
 export { buildPrompt, buildPromptFromRecipe } from "./core/build-prompt.ts";
 export { saveTurn } from "./core/save-turn.ts";
 export {
-  composeSubagentTurnId,
   normalizeToolNames,
   PI_BUILTIN_TOOLS,
   PI_DEFAULT_SUBAGENT_TOOLS,
@@ -42,27 +41,29 @@ export {
   appendSessionFileCall,
   appendSessionMessage,
   appendSessionToolCall,
+  compressMessageSequences,
   createSession,
   createSessionLayout,
-  createSessionTask,
   createSessionsRootDir,
+  expandMessageSequenceRanges,
+  getCurrentParentSequence,
   getNextMessageSequence,
-  getSessionTask,
   listContextMounts,
   listSessions,
   mountContext,
+  readCurrentContextState,
   readEvents,
   readFileCalls,
+  readLatestSendSnapshot,
   readMessages,
   readSessionConfig,
-  readTasks,
   readToolCalls,
   unmountContext,
   updateSessionConfig,
-  updateSessionTask,
   writeSessionConfig,
 } from "./core/session-store.ts";
 export {
+  createInputMessage,
   executeSessionTask,
 } from "./core/session-runtime.ts";
 export {

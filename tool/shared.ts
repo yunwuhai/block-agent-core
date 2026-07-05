@@ -4,6 +4,8 @@ export interface ExtensionContextLike {
   cwd: string;
   modelRegistry: ModelRegistry;
   model?: PiModel;
+  authStorage?: unknown;
+  piSdkModule?: unknown;
 }
 
 export interface ToolResponse {

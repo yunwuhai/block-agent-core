@@ -1,62 +1,71 @@
----
-name: block-agent-core
-description: Manage persistent PI-backed sessions with mounted context blocks, queued tasks, JSONL archives, and event streams.
----
+# Block Agent Core Skill
 
-# Block Agent Core
+Use this skill when you want to manage a persistent PI-backed session instead of making one-off subagent calls.
 
-Use the `block_agent_core` tool when you need a persistent external agent session instead of a one-shot subagent call.
+## Best fit
 
-## When to Use
-
-- You want one session to keep fixed system prompts and default tool/model settings.
+- You want to keep history across multiple sends.
 - You want to mount and unmount context blocks over time.
-- You want multiple sessions to run tasks in parallel under a global scheduler.
-- You want reasoning, replies, tool calls, file calls, and task lifecycle events archived in JSONL form.
+- You want structured archives in JSONL files.
+- You want to inspect event logs after a send.
 
-## Main Actions
+## Preferred actions
 
 ### `create_session`
 
-Create a persistent session with:
+Create one persistent session with:
 
 - `sessionId`
 - `systemPromptFilePaths`
 - `sdkMode`
 - optional `modelSelection`
 - optional `tools`
-- optional `sdkOptions`
 
 ### `mount_context`
 
-Append mounted context sources to an existing session.
+Use when you want to add context before the next send.
 
-### `send_task`
+Supports:
 
-Queue one task for a session.
+- `sources`
+- `seqRanges`
 
-Typical inputs:
+### `unmount_context`
+
+Use when you want to remove active history.
+
+Prefer:
+
+- `seqRanges`
+
+Compatibility cleanup is still possible with:
+
+- `mountIds`
+
+### `send_message`
+
+Use when you want to append one new input and run the session.
+
+Typical fields:
 
 - `sessionId`
-- `taskId`
 - `inputText`
+- optional `requestKey`
 - optional `temporarySources`
-
-### `list_tasks` / `get_task`
-
-Inspect queued, running, completed, or failed tasks.
 
 ### `read_events`
 
-Read the persistent event stream for task lifecycle and tool execution updates.
+Use when you want to inspect lifecycle and tool activity.
 
-### `archive_session`
+You can filter by:
 
-Append manual messages, tool calls, or file calls into session storage.
+- `sessionId`
+- optional `requestKey`
 
-## Key Constraints
+## Storage model
 
-- Context policy is caller-owned; the project only provides loading primitives.
-- System prompts are always prepended on each task run.
-- The same session does not run multiple tasks concurrently.
-- Global concurrency is capped by the scheduler, not by the caller.
+- `messages.jsonl` is the only context mainline
+- `tool-calls.jsonl` stores merged tool call/result records
+- `file-calls.jsonl` stores referenced file paths
+- `events.jsonl` stores compact audit events
+- `system-config.json` stores fixed prompts and default PI settings

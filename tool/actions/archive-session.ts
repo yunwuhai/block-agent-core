@@ -1,9 +1,7 @@
-import { randomUUID } from "node:crypto";
 import {
   appendSessionFileCall,
   appendSessionMessage,
   appendSessionToolCall,
-  getNextMessageSequence,
   type SessionFileCallRecord,
   type SessionMessageRecord,
   type SessionToolCallRecord,
@@ -15,7 +13,7 @@ export interface ArchiveSessionParams {
   sessionId: string;
   messages?: Array<Partial<SessionMessageRecord> & { kind: string }>;
   toolCalls?: Array<Partial<SessionToolCallRecord> & { toolName: string }>;
-  fileCalls?: Array<Partial<SessionFileCallRecord> & { filePath: string; accessType: SessionFileCallRecord["accessType"] }>;
+  fileCalls?: Array<Partial<SessionFileCallRecord> & { filePath: string }>;
 }
 
 export async function handleArchiveSession(
@@ -23,17 +21,15 @@ export async function handleArchiveSession(
   ctx: ExtensionContextLike,
 ): Promise<ToolResponse> {
   try {
-    let nextSequence = await getNextMessageSequence(ctx.cwd, params.sessionId);
-
     for (const message of params.messages ?? []) {
       await appendSessionMessage(ctx.cwd, params.sessionId, {
-        id: message.id ?? `message-${randomUUID()}`,
-        sequence: message.sequence ?? nextSequence++,
+        ...(message.seq !== undefined ? { seq: message.seq } : {}),
         kind: message.kind as SessionMessageRecord["kind"],
-        ...(message.taskId ? { taskId: message.taskId } : {}),
+        ...(message.parentSeq !== undefined ? { parentSeq: message.parentSeq } : {}),
+        ...(message.requestKey ? { requestKey: message.requestKey } : {}),
         ...(message.text !== undefined ? { text: message.text } : {}),
-        ...(message.toolCallId ? { toolCallId: message.toolCallId } : {}),
-        ...(message.fileCallId ? { fileCallId: message.fileCallId } : {}),
+        ...(message.toolCallSeq !== undefined ? { toolCallSeq: message.toolCallSeq } : {}),
+        ...(message.fileCallSeq !== undefined ? { fileCallSeq: message.fileCallSeq } : {}),
         ...(message.tags ? { tags: message.tags } : {}),
         ...(message.handoff ? { handoff: message.handoff } : {}),
         ...(message.metadata ? { metadata: message.metadata } : {}),
@@ -42,12 +38,11 @@ export async function handleArchiveSession(
 
     for (const toolCall of params.toolCalls ?? []) {
       await appendSessionToolCall(ctx.cwd, params.sessionId, {
-        id: toolCall.id ?? `tool-${randomUUID()}`,
-        taskId: toolCall.taskId ?? "manual-archive",
+        ...(toolCall.seq !== undefined ? { seq: toolCall.seq } : {}),
+        ...(toolCall.requestKey ? { requestKey: toolCall.requestKey } : {}),
         toolName: toolCall.toolName,
         params: toolCall.params ?? {},
         result: toolCall.result ?? null,
-        ...(toolCall.messageId ? { messageId: toolCall.messageId } : {}),
         ...(toolCall.error !== undefined ? { error: toolCall.error } : {}),
         ...(toolCall.metadata ? { metadata: toolCall.metadata } : {}),
       });
@@ -55,12 +50,9 @@ export async function handleArchiveSession(
 
     for (const fileCall of params.fileCalls ?? []) {
       await appendSessionFileCall(ctx.cwd, params.sessionId, {
-        id: fileCall.id ?? `file-${randomUUID()}`,
+        ...(fileCall.seq !== undefined ? { seq: fileCall.seq } : {}),
         filePath: fileCall.filePath,
-        accessType: fileCall.accessType,
-        ...(fileCall.taskId ? { taskId: fileCall.taskId } : {}),
-        ...(fileCall.messageId ? { messageId: fileCall.messageId } : {}),
-        ...(fileCall.toolCallId ? { toolCallId: fileCall.toolCallId } : {}),
+        ...(fileCall.requestKey ? { requestKey: fileCall.requestKey } : {}),
         ...(fileCall.metadata ? { metadata: fileCall.metadata } : {}),
       });
     }

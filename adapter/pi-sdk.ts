@@ -39,6 +39,14 @@ async function importPiCodingAgentSdk(sdkModulePath?: string): Promise<any> {
     return import(pathToFileURL(sdkModulePath).href);
   }
   try {
+    const resolved = await import.meta.resolve("@earendil-works/pi-coding-agent");
+    if (typeof resolved === "string" && resolved.startsWith("file:///")) {
+      return await import(resolved);
+    }
+  } catch {
+    // Fall back to normal import and runtime scans below.
+  }
+  try {
     return await import("@earendil-works/pi-coding-agent");
   } catch (error) {
     const baseDir = join(homedir(), ".local", "share", "pi-node");
@@ -86,6 +94,7 @@ export interface PiSdkRunOptions extends SubagentRunRequest {
   turnIdentity: SubagentTurnIdentity;
   agentDir?: string;
   authStorage?: AuthStorage;
+  piSdkModule?: unknown;
   modelRegistry: ModelRegistry;
   currentModel?: PiModel;
   customTools?: ToolDefinition[];
@@ -237,7 +246,7 @@ function finalizeToolTrace(
 export async function runSubagentWithPiSdk(options: PiSdkRunOptions): Promise<PiSdkRunResult> {
   let runtimeModelRegistry = options.modelRegistry;
   let runtimeCurrentModel = options.currentModel;
-  let pi = await importPiCodingAgentSdk(options.sdkOptions?.sdkModulePath);
+  let pi = options.piSdkModule ?? await importPiCodingAgentSdk(options.sdkOptions?.sdkModulePath);
 
   if (options.sdkMode === "standalone-sdk") {
     const standalone = await createStandaloneRuntime(options.sdkOptions, options.modelSelection);

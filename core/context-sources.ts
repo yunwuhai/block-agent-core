@@ -84,7 +84,7 @@ export async function loadJsonlFieldsSource(source: JsonlFieldsSource): Promise<
       return false;
     }
     if (source.startSequence !== undefined || source.endSequence !== undefined) {
-      const sequence = Number(getNestedValue(record, "sequence"));
+      const sequence = Number(getNestedValue(record, "seq") ?? getNestedValue(record, "sequence"));
       if (Number.isNaN(sequence)) {
         return false;
       }
@@ -113,22 +113,23 @@ export async function loadJsonlFieldsSource(source: JsonlFieldsSource): Promise<
 
   function expandRecord(record: Record<string, unknown>): string {
     const kind = typeof record.kind === "string" ? record.kind : undefined;
-    if (kind === "tool_call" && typeof record.toolCallId === "string") {
-      const toolCall = toolCallRecords?.find(item => String(item.id ?? "") === record.toolCallId);
+    if (kind === "tool_call" && Number.isInteger(Number(record.toolCallSeq))) {
+      const toolCallSeq = Number(record.toolCallSeq);
+      const toolCall = toolCallRecords?.find(item => Number(item.seq ?? -1) === toolCallSeq);
       if (!toolCall) return "";
       return [
         `Tool: ${String(toolCall.toolName ?? "")}`,
         `Params: ${JSON.stringify(toolCall.params ?? {}, null, 2)}`,
+        `Error: ${Boolean(toolCall.error)}`,
         `Result: ${JSON.stringify(toolCall.result ?? null, null, 2)}`,
       ].join("\n");
     }
-    if (kind === "file_call" && typeof record.fileCallId === "string") {
-      const fileCall = fileCallRecords?.find(item => String(item.id ?? "") === record.fileCallId);
+    if (kind === "file_call" && Number.isInteger(Number(record.fileCallSeq))) {
+      const fileCallSeq = Number(record.fileCallSeq);
+      const fileCall = fileCallRecords?.find(item => Number(item.seq ?? -1) === fileCallSeq);
       if (!fileCall) return "";
       return [
         `File: ${String(fileCall.filePath ?? "")}`,
-        `Access: ${String(fileCall.accessType ?? "")}`,
-        ...(typeof fileCall.toolCallId === "string" ? [`ToolCall: ${fileCall.toolCallId}`] : []),
       ].join("\n");
     }
     return "";

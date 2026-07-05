@@ -5,7 +5,7 @@ import { handleListModels } from "./actions/list-models.ts";
 import { handleCreateSession, handleGetSession, handleListSessions } from "./actions/create-session.ts";
 import { handleUpdateSession } from "./actions/update-session.ts";
 import { handleListContextMounts, handleMountContext, handleUnmountContext } from "./actions/context-mounts.ts";
-import { handleGetTask, handleListTasks, handleSendTask } from "./actions/send-task.ts";
+import { handleSendMessage } from "./actions/send-task.ts";
 import { handleReadEvents } from "./actions/read-events.ts";
 import type { ExtensionContextLike } from "./shared.ts";
 import { ok } from "./shared.ts";
@@ -18,11 +18,11 @@ export function registerBlockAgentCoreTool(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "block_agent_core",
     label: "Block Agent Core",
-    description: "Manage persistent agent sessions, queue tasks, read event streams, and inspect model availability.",
+    description: "Manage persistent agent sessions, context mounts, message sends, event streams, and model availability.",
     parameters: Type.Object({
       action: Type.String(),
       sessionId: Type.Optional(Type.String()),
-      taskId: Type.Optional(Type.String()),
+      requestKey: Type.Optional(Type.String()),
       inputText: Type.Optional(Type.String()),
       systemPromptFilePaths: Type.Optional(Type.Array(Type.String())),
       sdkMode: Type.Optional(Type.Union([Type.Literal("host-inherit"), Type.Literal("standalone-sdk")])),
@@ -35,7 +35,8 @@ export function registerBlockAgentCoreTool(pi: ExtensionAPI): void {
       }, { additionalProperties: true })),
       sources: Type.Optional(Type.Array(passthroughObject)),
       temporarySources: Type.Optional(Type.Array(passthroughObject)),
-      mountIds: Type.Optional(Type.Array(Type.String())),
+      seqRanges: Type.Optional(Type.Array(Type.Array(Type.Number()))),
+      mountIds: Type.Optional(Type.Array(Type.Union([Type.String(), Type.Number()]))),
       metadata: Type.Optional(Type.Object({}, { additionalProperties: true })),
       messages: Type.Optional(Type.Array(Type.Object({}, { additionalProperties: true }))),
       toolCalls: Type.Optional(Type.Array(Type.Object({}, { additionalProperties: true }))),
@@ -65,12 +66,9 @@ export function registerBlockAgentCoreTool(pi: ExtensionAPI): void {
           return handleUnmountContext(params as any, ctx);
         case "list_context_mounts":
           return handleListContextMounts(params as any, ctx);
+        case "send_message":
         case "send_task":
-          return handleSendTask(params as any, ctx);
-        case "get_task":
-          return handleGetTask(params as any, ctx);
-        case "list_tasks":
-          return handleListTasks(params as any, ctx);
+          return handleSendMessage(params as any, ctx);
         case "read_events":
           return handleReadEvents(params as any, ctx);
         case "list_models":
@@ -79,7 +77,7 @@ export function registerBlockAgentCoreTool(pi: ExtensionAPI): void {
           return handleArchiveSession(params as any, ctx);
         default:
           return ok(
-            `Unknown action: ${action}. Use create_session, get_session, list_sessions, update_session, mount_context, unmount_context, list_context_mounts, send_task, get_task, list_tasks, read_events, list_models, or archive_session.`,
+            `Unknown action: ${action}. Use create_session, get_session, list_sessions, update_session, mount_context, unmount_context, list_context_mounts, send_message, read_events, list_models, or archive_session.`,
           );
       }
     },

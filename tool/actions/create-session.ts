@@ -40,10 +40,15 @@ export async function handleGetSession(
 ): Promise<ToolResponse> {
   try {
     const config = await readSessionConfig(ctx.cwd, params.sessionId);
+    const { listContextMounts, readCurrentContextState } = await import("../../core/session-store.ts");
+    const activeMounts = await listContextMounts(ctx.cwd, params.sessionId);
+    const currentState = await readCurrentContextState(ctx.cwd, params.sessionId);
     return ok(JSON.stringify({
       session: config,
+      activeMounts,
+      activeMessageSeqs: currentState.activeMessageSeqs,
       layout: createSessionLayout(ctx.cwd, params.sessionId),
-    }, null, 2), { session: config });
+    }, null, 2), { session: config, activeMounts, activeMessageSeqs: currentState.activeMessageSeqs });
   } catch (err) {
     return error(`Error getting session: ${(err as Error).message}`);
   }

@@ -1,13 +1,15 @@
 import {
   appendSessionEvent,
-  createSessionTask,
-  getSessionTask,
-  listSessions,
-  readTasks,
-  updateSessionTask,
-  type SessionTaskRecord,
+  compressMessageSequences,
+  readCurrentContextState,
+  readSessionConfig,
 } from "../../core/session-store.ts";
-import { executeSessionTask, type SessionTaskRunnerDeps } from "../../core/session-runtime.ts";
+import {
+  createInputMessage,
+  executeSessionTask,
+  rollbackCreatedInputArtifacts,
+  type SessionTaskRunnerDeps,
+} from "../../core/session-runtime.ts";
 import { getDefaultTaskScheduler, type TaskScheduler } from "../../core/task-scheduler.ts";
 import type { ContextSource } from "../../core/context-sources.ts";
 import type { ExtensionContextLike, ToolResponse } from "../shared.ts";
@@ -15,10 +17,9 @@ import { error, ok } from "../shared.ts";
 
 export interface SendTaskParams {
   sessionId: string;
-  taskId: string;
+  requestKey?: string;
   inputText: string;
   temporarySources?: ContextSource[];
-  archiveEnabled?: boolean;
   metadata?: Record<string, unknown>;
 }
 
@@ -26,12 +27,15 @@ export interface SendTaskDeps extends SessionTaskRunnerDeps {
   scheduler: TaskScheduler;
 }
 
-export async function handleSendTask(
+export async function handleSendMessage(
   params: SendTaskParams,
   ctx: ExtensionContextLike,
   deps?: Partial<SendTaskDeps>,
 ): Promise<ToolResponse> {
   try {
+    await readSessionConfig(ctx.cwd, params.sessionId);
+    const previousState = await readCurrentContextState(ctx.cwd, params.sessionId);
+
     const scheduler = deps?.scheduler ?? getDefaultTaskScheduler();
     const runtimeDeps: SessionTaskRunnerDeps = {
       composeContextText: deps?.composeContextText ?? (async (sources, separator) => {
@@ -44,121 +48,88 @@ export async function handleSendTask(
       }),
     };
 
-    const task = await createSessionTask(ctx.cwd, params.sessionId, {
-      taskId: params.taskId,
-      inputText: params.inputText,
-      ...(params.temporarySources ? { temporarySources: params.temporarySources } : {}),
-      ...(params.archiveEnabled !== undefined ? { archiveEnabled: params.archiveEnabled } : {}),
-      ...(params.metadata ? { metadata: params.metadata } : {}),
-    });
-    await appendSessionEvent(ctx.cwd, params.sessionId, {
-      taskId: task.id,
-      type: "task_registered",
-      payload: { inputText: params.inputText },
-    });
+    const created = await createInputMessage(
+      ctx.cwd,
+      params.sessionId,
+      params.inputText,
+      params.requestKey,
+      params.metadata,
+    );
+    const registeredAt = new Date().toISOString();
 
-    const registeredAt = Date.now();
     const { queuePosition } = scheduler.enqueue({
-      taskId: task.id,
+      taskId: params.requestKey ?? `${params.sessionId}:${created.inputMessage.seq}`,
       sessionId: params.sessionId,
-      registeredAt,
+      registeredAt: Date.now(),
       execute: async () => {
-        await updateSessionTask(ctx.cwd, params.sessionId, task.id, current => ({
-          ...(() => {
-            const { queuePosition: _queuePosition, ...rest } = current;
-            return rest;
-          })(),
-          status: "running",
-          startedAt: new Date().toISOString(),
-        } as SessionTaskRecord));
-        await appendSessionEvent(ctx.cwd, params.sessionId, {
-          taskId: task.id,
-          type: "task_started",
-          payload: {},
-        });
         try {
-          const result = await executeSessionTask(ctx.cwd, params.sessionId, task, ctx, runtimeDeps);
-          await updateSessionTask(ctx.cwd, params.sessionId, task.id, current => ({
-            ...(() => {
-              const { queuePosition: _queuePosition, ...rest } = current;
-              return rest;
-            })(),
-            status: "completed",
-            model: result.model,
-            tools: result.tools,
-            finishedAt: new Date().toISOString(),
-          } as SessionTaskRecord));
+          const result = await executeSessionTask(ctx.cwd, params.sessionId, {
+            ...(params.requestKey ? { requestKey: params.requestKey } : {}),
+            inputText: params.inputText,
+            inputSeq: created.inputMessage.seq,
+            ...(created.parentSeq !== undefined ? { parentSeq: created.parentSeq } : {}),
+            systemPromptSeqs: created.systemPromptSeqs,
+            ...(params.temporarySources ? { temporarySources: params.temporarySources } : {}),
+            ...(params.metadata ? { metadata: params.metadata } : {}),
+          }, ctx, runtimeDeps);
+
           await appendSessionEvent(ctx.cwd, params.sessionId, {
-            taskId: task.id,
-            type: "task_completed",
+            ...(params.requestKey ? { requestKey: params.requestKey } : {}),
+            type: "send_finished",
             payload: {
+              status: "completed",
+              inputSeq: created.inputMessage.seq,
+              ...(created.parentSeq !== undefined ? { parentSeq: created.parentSeq } : {}),
+              systemPromptSeqRanges: compressMessageSequences(created.systemPromptSeqs),
+              outputMessageSeqRanges: compressMessageSequences(result.outputMessageSeqs),
+              activeMessageSeqRanges: compressMessageSequences(result.activeMessageSeqs),
               model: result.model,
               tools: result.tools,
             },
           });
         } catch (err) {
-          await updateSessionTask(ctx.cwd, params.sessionId, task.id, current => ({
-            ...(() => {
-              const { queuePosition: _queuePosition, ...rest } = current;
-              return rest;
-            })(),
-            status: "failed",
-            errorMessage: (err as Error).message,
-            finishedAt: new Date().toISOString(),
-          } as SessionTaskRecord));
+          await rollbackCreatedInputArtifacts(ctx.cwd, params.sessionId, created);
           await appendSessionEvent(ctx.cwd, params.sessionId, {
-            taskId: task.id,
-            type: "task_failed",
+            ...(params.requestKey ? { requestKey: params.requestKey } : {}),
+            type: "send_finished",
             payload: {
-              error: (err as Error).message,
+              status: "failed",
+              inputSeq: created.inputMessage.seq,
+              ...(created.parentSeq !== undefined ? { parentSeq: created.parentSeq } : {}),
+              systemPromptSeqRanges: compressMessageSequences(created.systemPromptSeqs),
+              activeMessageSeqRanges: compressMessageSequences(previousState.activeMessageSeqs),
+              errorMessage: (err as Error).message,
             },
           });
         }
       },
     });
 
-    await updateSessionTask(ctx.cwd, params.sessionId, task.id, current => ({
-      ...current,
-      queuePosition,
-    }));
     await appendSessionEvent(ctx.cwd, params.sessionId, {
-      taskId: task.id,
-      type: "task_queued",
-      payload: { queuePosition, registeredAt },
+      ...(params.requestKey ? { requestKey: params.requestKey } : {}),
+      type: "send_enqueued",
+      payload: {
+        queuePosition,
+        registeredAt,
+        inputSeq: created.inputMessage.seq,
+        ...(created.parentSeq !== undefined ? { parentSeq: created.parentSeq } : {}),
+        systemPromptSeqRanges: compressMessageSequences(created.systemPromptSeqs),
+      },
     });
 
-    const currentTask = await getSessionTask(ctx.cwd, params.sessionId, task.id);
-    return ok(JSON.stringify({ task: currentTask }, null, 2), { task: currentTask });
+    const send = {
+      sessionId: params.sessionId,
+      status: "queued",
+      registeredAt,
+      queuePosition,
+      inputSeq: created.inputMessage.seq,
+      ...(created.parentSeq !== undefined ? { parentSeq: created.parentSeq } : {}),
+      ...(params.requestKey ? { requestKey: params.requestKey } : {}),
+    };
+    return ok(JSON.stringify({ send }, null, 2), { send });
   } catch (err) {
-    return error(`Error sending task: ${(err as Error).message}`);
+    return error(`Error sending message: ${(err as Error).message}`);
   }
 }
 
-export async function handleGetTask(
-  params: { sessionId: string; taskId: string },
-  ctx: ExtensionContextLike,
-): Promise<ToolResponse> {
-  try {
-    const task = await getSessionTask(ctx.cwd, params.sessionId, params.taskId);
-    if (!task) {
-      return error(`Task not found: ${params.taskId}`);
-    }
-    return ok(JSON.stringify({ task }, null, 2), { task });
-  } catch (err) {
-    return error(`Error getting task: ${(err as Error).message}`);
-  }
-}
-
-export async function handleListTasks(
-  params: { sessionId?: string },
-  ctx: ExtensionContextLike,
-): Promise<ToolResponse> {
-  try {
-    const tasks = params.sessionId
-      ? await readTasks(ctx.cwd, params.sessionId)
-      : (await Promise.all((await listSessions(ctx.cwd)).map(session => readTasks(ctx.cwd, session.sessionId)))).flat();
-    return ok(JSON.stringify({ tasks }, null, 2), { tasks });
-  } catch (err) {
-    return error(`Error listing tasks: ${(err as Error).message}`);
-  }
-}
+export const handleSendTask = handleSendMessage;
