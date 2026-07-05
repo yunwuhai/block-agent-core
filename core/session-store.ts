@@ -36,46 +36,47 @@ export interface SessionSystemConfig {
   systemPromptFilePaths: string[];
   systemPromptText: string;
   sdkMode: SessionSdkMode;
+  nextTurnId: number;
   modelSelection?: SubagentModelSelection;
   tools?: SubagentToolSelection;
   sdkOptions?: StandaloneSdkOptions;
 }
 
 export interface SessionMessageRecord {
+  turnId?: number;
   id: number;
   kind: SessionMessageKind;
   text?: string;
   parentId?: number;
   toolCallId?: number;
   fileCallId?: number;
-  requestKey?: string;
   tags?: string[];
   handoff?: string;
   metadata?: Record<string, unknown>;
 }
 
 export interface SessionToolCallRecord {
+  turnId?: number;
   id: number;
   toolName: string;
   params: unknown;
   result: unknown;
   error?: boolean;
-  requestKey?: string;
   metadata?: Record<string, unknown>;
 }
 
 export interface SessionFileCallRecord {
+  turnId?: number;
   id: number;
   filePath: string;
-  requestKey?: string;
   metadata?: Record<string, unknown>;
 }
 
 export interface SessionEventRecord {
+  turnId?: number;
   id: number;
   type: string;
   createdAt: string;
-  requestKey?: string;
   payload: Record<string, unknown>;
 }
 
@@ -97,8 +98,12 @@ export interface CreateSessionInput {
   sdkOptions?: StandaloneSdkOptions;
 }
 
-function nowIso(): string {
-  return new Date().toISOString();
+export function nowIso(): string {
+  const d = new Date();
+  const offset = -d.getTimezoneOffset();
+  const sign = offset >= 0 ? "+" : "-";
+  const pad = (n: number, len = 2) => String(n).padStart(len, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}${sign}${pad(Math.floor(Math.abs(offset) / 60))}:${pad(Math.abs(offset) % 60)}`;
 }
 
 async function withFileLock<T>(filePath: string, task: () => Promise<T>): Promise<T> {
@@ -233,6 +238,7 @@ async function readLegacySystemConfig(layout: SessionLayout): Promise<SessionSys
       : [],
     systemPromptText: typeof parsed.systemPromptText === "string" ? parsed.systemPromptText : "",
     sdkMode: parsed.sdkMode === "standalone-sdk" ? "standalone-sdk" : "host-inherit",
+    nextTurnId: typeof parsed.nextTurnId === "number" ? parsed.nextTurnId : 1,
     ...(parsed.modelSelection ? { modelSelection: parsed.modelSelection as SubagentModelSelection } : {}),
     ...(parsed.tools ? { tools: parsed.tools as SubagentToolSelection } : {}),
     ...(parsed.sdkOptions ? { sdkOptions: parsed.sdkOptions as StandaloneSdkOptions } : {}),
@@ -333,6 +339,7 @@ export async function createSession(
     systemPromptFilePaths: [...input.systemPromptFilePaths],
     systemPromptText,
     sdkMode: input.sdkMode,
+    nextTurnId: 1,
     ...(input.modelSelection ? { modelSelection: input.modelSelection } : {}),
     ...(input.tools ? { tools: input.tools } : {}),
     ...(input.sdkOptions ? { sdkOptions: input.sdkOptions } : {}),
@@ -370,6 +377,14 @@ export async function readSessionConfig(cwd: string, sessionId: string): Promise
     throw new Error(`Session not found: ${sessionId}`);
   }
   return legacy;
+}
+
+export async function allocateTurnId(cwd: string, sessionId: string): Promise<number> {
+  const config = await readSessionConfig(cwd, sessionId);
+  const turnId = config.nextTurnId;
+  config.nextTurnId = turnId + 1;
+  await writeSessionConfig(cwd, config);
+  return turnId;
 }
 
 export async function writeSessionConfig(cwd: string, config: SessionSystemConfig): Promise<void> {
@@ -462,9 +477,12 @@ export async function appendSessionMessage(
 ): Promise<SessionMessageRecord> {
   const layout = createSessionLayout(cwd, sessionId);
   return withFileLock(layout.messagesPath, async () => {
+    const { turnId, parentId, id: callerId, ...rest } = record;
     const fullRecord: SessionMessageRecord = {
-      ...record,
-      id: record.id ?? await getNextId(layout.messagesPath),
+      ...(turnId !== undefined ? { turnId } : {}),
+      id: callerId ?? await getNextId(layout.messagesPath),
+      ...(parentId !== undefined ? { parentId } : {}),
+      ...rest,
     };
     await appendJsonl(layout.messagesPath, fullRecord);
     return fullRecord;
@@ -478,9 +496,11 @@ export async function appendSessionToolCall(
 ): Promise<SessionToolCallRecord> {
   const layout = createSessionLayout(cwd, sessionId);
   return withFileLock(layout.toolCallsPath, async () => {
+    const { turnId, id: callerId, ...rest } = record;
     const fullRecord: SessionToolCallRecord = {
-      ...record,
-      id: record.id ?? await getNextId(layout.toolCallsPath),
+      ...(turnId !== undefined ? { turnId } : {}),
+      id: callerId ?? await getNextId(layout.toolCallsPath),
+      ...rest,
     };
     await appendJsonl(layout.toolCallsPath, fullRecord);
     return fullRecord;
@@ -494,9 +514,11 @@ export async function appendSessionFileCall(
 ): Promise<SessionFileCallRecord> {
   const layout = createSessionLayout(cwd, sessionId);
   return withFileLock(layout.fileCallsPath, async () => {
+    const { turnId, id: callerId, ...rest } = record;
     const fullRecord: SessionFileCallRecord = {
-      ...record,
-      id: record.id ?? await getNextId(layout.fileCallsPath),
+      ...(turnId !== undefined ? { turnId } : {}),
+      id: callerId ?? await getNextId(layout.fileCallsPath),
+      ...rest,
     };
     await appendJsonl(layout.fileCallsPath, fullRecord);
     return fullRecord;
@@ -510,10 +532,12 @@ export async function appendSessionEvent(
 ): Promise<SessionEventRecord> {
   const layout = createSessionLayout(cwd, sessionId);
   return withFileLock(layout.eventsPath, async () => {
+    const { turnId, id: callerId, ...rest } = record;
     const fullRecord: SessionEventRecord = {
-      ...record,
-      id: record.id ?? await getNextId(layout.eventsPath),
+      ...(turnId !== undefined ? { turnId } : {}),
+      id: callerId ?? await getNextId(layout.eventsPath),
       createdAt: nowIso(),
+      ...rest,
     };
     await appendJsonl(layout.eventsPath, fullRecord);
     return fullRecord;
@@ -656,7 +680,7 @@ export async function unmountContext(
 export async function readLatestSendSnapshot(
   cwd: string,
   sessionId: string,
-): Promise<{ activeMessageIds: number[]; lastInputId?: number; lastParentId?: number; lastRequestKey?: string }> {
+): Promise<{ activeMessageIds: number[]; lastInputId?: number; lastParentId?: number; lastTurnId?: number }> {
   const events = await readEvents(cwd, sessionId);
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]!;
@@ -667,7 +691,7 @@ export async function readLatestSendSnapshot(
       activeMessageIds: fromNumberRanges(event.payload.activeMessageIdRanges),
       ...(Number.isInteger(Number(event.payload.inputId)) ? { lastInputId: Number(event.payload.inputId) } : {}),
       ...(Number.isInteger(Number(event.payload.parentId)) ? { lastParentId: Number(event.payload.parentId) } : {}),
-      ...(typeof event.requestKey === "string" ? { lastRequestKey: event.requestKey } : {}),
+      ...(typeof event.turnId === "number" ? { lastTurnId: event.turnId } : {}),
     };
   }
   return { activeMessageIds: [] };

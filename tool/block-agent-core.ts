@@ -22,7 +22,6 @@ export function registerBlockAgentCoreTool(pi: ExtensionAPI): void {
     parameters: Type.Object({
       action: Type.String(),
       sessionId: Type.Optional(Type.String()),
-      requestKey: Type.Optional(Type.String()),
       inputText: Type.Optional(Type.String()),
       systemPromptFilePaths: Type.Optional(Type.Array(Type.String())),
       sdkMode: Type.Optional(Type.Union([Type.Literal("host-inherit"), Type.Literal("standalone-sdk")])),

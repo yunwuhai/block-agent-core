@@ -26,7 +26,7 @@ export async function handleArchiveSession(
         ...(message.id !== undefined ? { id: message.id } : {}),
         kind: message.kind as SessionMessageRecord["kind"],
         ...(message.parentId !== undefined ? { parentId: message.parentId } : {}),
-        ...(message.requestKey ? { requestKey: message.requestKey } : {}),
+        ...(message.turnId !== undefined ? { turnId: message.turnId } : {}),
         ...(message.text !== undefined ? { text: message.text } : {}),
         ...(message.toolCallId !== undefined ? { toolCallId: message.toolCallId } : {}),
         ...(message.fileCallId !== undefined ? { fileCallId: message.fileCallId } : {}),
@@ -39,7 +39,7 @@ export async function handleArchiveSession(
     for (const toolCall of params.toolCalls ?? []) {
       await appendSessionToolCall(ctx.cwd, params.sessionId, {
         ...(toolCall.id !== undefined ? { id: toolCall.id } : {}),
-        ...(toolCall.requestKey ? { requestKey: toolCall.requestKey } : {}),
+        ...(toolCall.turnId !== undefined ? { turnId: toolCall.turnId } : {}),
         toolName: toolCall.toolName,
         params: toolCall.params ?? {},
         result: toolCall.result ?? null,
@@ -52,7 +52,7 @@ export async function handleArchiveSession(
       await appendSessionFileCall(ctx.cwd, params.sessionId, {
         ...(fileCall.id !== undefined ? { id: fileCall.id } : {}),
         filePath: fileCall.filePath,
-        ...(fileCall.requestKey ? { requestKey: fileCall.requestKey } : {}),
+        ...(fileCall.turnId !== undefined ? { turnId: fileCall.turnId } : {}),
         ...(fileCall.metadata ? { metadata: fileCall.metadata } : {}),
       });
     }

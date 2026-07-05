@@ -1,6 +1,8 @@
 import {
+  allocateTurnId,
   appendSessionEvent,
   compressMessageRanges,
+  nowIso,
   readCurrentContextState,
   readSessionConfig,
 } from "../../core/session-store.ts";
@@ -17,7 +19,6 @@ import { error, ok } from "../shared.ts";
 
 export interface SendTaskParams {
   sessionId: string;
-  requestKey?: string;
   inputText: string;
   temporarySources?: ContextSource[];
   metadata?: Record<string, unknown>;
@@ -35,6 +36,7 @@ export async function handleSendMessage(
   try {
     await readSessionConfig(ctx.cwd, params.sessionId);
     const previousState = await readCurrentContextState(ctx.cwd, params.sessionId);
+    const turnId = await allocateTurnId(ctx.cwd, params.sessionId);
 
     const scheduler = deps?.scheduler ?? getDefaultTaskScheduler();
     const runtimeDeps: SessionTaskRunnerDeps = {
@@ -52,19 +54,19 @@ export async function handleSendMessage(
       ctx.cwd,
       params.sessionId,
       params.inputText,
-      params.requestKey,
+      turnId,
       params.metadata,
     );
-    const registeredAt = new Date().toISOString();
+    const registeredAt = nowIso();
 
     const { queuePosition } = scheduler.enqueue({
-      taskId: params.requestKey ?? `${params.sessionId}:${created.inputMessage.id}`,
+      taskId: String(turnId),
       sessionId: params.sessionId,
       registeredAt: Date.now(),
       execute: async () => {
         try {
           const result = await executeSessionTask(ctx.cwd, params.sessionId, {
-            ...(params.requestKey ? { requestKey: params.requestKey } : {}),
+            turnId,
             inputText: params.inputText,
             inputId: created.inputMessage.id,
             ...(created.parentId !== undefined ? { parentId: created.parentId } : {}),
@@ -73,7 +75,7 @@ export async function handleSendMessage(
           }, ctx, runtimeDeps);
 
           await appendSessionEvent(ctx.cwd, params.sessionId, {
-            ...(params.requestKey ? { requestKey: params.requestKey } : {}),
+            turnId,
             type: "send_finished",
             payload: {
               status: "completed",
@@ -88,7 +90,7 @@ export async function handleSendMessage(
         } catch (err) {
           await rollbackCreatedInputArtifacts(ctx.cwd, params.sessionId, created);
           await appendSessionEvent(ctx.cwd, params.sessionId, {
-            ...(params.requestKey ? { requestKey: params.requestKey } : {}),
+            turnId,
             type: "send_finished",
             payload: {
               status: "failed",
@@ -103,7 +105,7 @@ export async function handleSendMessage(
     });
 
     await appendSessionEvent(ctx.cwd, params.sessionId, {
-      ...(params.requestKey ? { requestKey: params.requestKey } : {}),
+      turnId,
       type: "send_enqueued",
       payload: {
         queuePosition,
@@ -115,12 +117,12 @@ export async function handleSendMessage(
 
     const send = {
       sessionId: params.sessionId,
+      turnId,
       status: "queued",
       registeredAt,
       queuePosition,
       inputId: created.inputMessage.id,
       ...(created.parentId !== undefined ? { parentId: created.parentId } : {}),
-      ...(params.requestKey ? { requestKey: params.requestKey } : {}),
     };
     return ok(JSON.stringify({ send }, null, 2), { send });
   } catch (err) {

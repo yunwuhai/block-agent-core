@@ -23,15 +23,20 @@ function createCtx() {
   } as any;
 }
 
-async function waitForSendFinish(sessionId: string, requestKey: string): Promise<void> {
+async function waitForSendFinish(sessionId: string, turnId: number): Promise<void> {
   for (let attempt = 0; attempt < 50; attempt += 1) {
-    const eventsResult = await handleReadEvents({ sessionId, requestKey }, createCtx());
+    const eventsResult = await handleReadEvents({ sessionId, turnId }, createCtx());
     if (eventsResult.content[0]!.text.includes("send_finished")) {
       return;
     }
     await new Promise(resolve => setTimeout(resolve, 20));
   }
-  throw new Error(`send did not finish in time: ${sessionId}/${requestKey}`);
+  throw new Error(`send did not finish in time: ${sessionId}/${turnId}`);
+}
+
+function extractTurnId(response: any): number {
+  const parsed = JSON.parse(response.content[0]!.text);
+  return parsed.send.turnId;
 }
 
 beforeEach(() => {
@@ -145,9 +150,8 @@ describe("session-first actions", () => {
     } as any, createCtx());
 
     const scheduler = new TaskScheduler(8);
-    await handleSendMessage({
+    const sendResponse = await handleSendMessage({
       sessionId: "session-b",
-      requestKey: "send-1",
       inputText: "Investigate the issue",
     }, createCtx(), {
       scheduler,
@@ -179,10 +183,11 @@ describe("session-first actions", () => {
         }],
       }),
     });
+    const send1TurnId = extractTurnId(sendResponse);
 
-    await waitForSendFinish("session-b", "send-1");
+    await waitForSendFinish("session-b", send1TurnId);
 
-    const eventsResult = await handleReadEvents({ sessionId: "session-b", requestKey: "send-1" }, createCtx());
+    const eventsResult = await handleReadEvents({ sessionId: "session-b", turnId: send1TurnId }, createCtx());
     expect(eventsResult.content[0]!.text).toContain("send_finished");
 
     const sessionDir = join(tmpDir, ".block-agent-core", "sessions", "session-b");
@@ -257,12 +262,12 @@ describe("session-first actions", () => {
       },
     };
 
-    await handleSendMessage({
+    const send1Response = await handleSendMessage({
       sessionId: "session-fail-retry",
-      requestKey: "send-1",
       inputText: "first try",
     }, createCtx(), failingDeps);
-    await waitForSendFinish("session-fail-retry", "send-1");
+    const send1TurnId = extractTurnId(send1Response);
+    await waitForSendFinish("session-fail-retry", send1TurnId);
 
     const sessionDir = join(tmpDir, ".block-agent-core", "sessions", "session-fail-retry");
     const messagesAfterFirstFail = await readJsonl<{ id: number; kind: string }>(join(sessionDir, "messages.jsonl"));
@@ -270,12 +275,12 @@ describe("session-first actions", () => {
     expect(messagesAfterFirstFail).toEqual([]);
     expect(fileCallsAfterFirstFail).toEqual([]);
 
-    await handleSendMessage({
+    const send2Response = await handleSendMessage({
       sessionId: "session-fail-retry",
-      requestKey: "send-2",
       inputText: "second try",
     }, createCtx(), failingDeps);
-    await waitForSendFinish("session-fail-retry", "send-2");
+    const send2TurnId = extractTurnId(send2Response);
+    await waitForSendFinish("session-fail-retry", send2TurnId);
 
     const messagesAfterSecondFail = await readJsonl<{ id: number; kind: string }>(join(sessionDir, "messages.jsonl"));
     const fileCallsAfterSecondFail = await readJsonl<{ id: number; filePath: string }>(join(sessionDir, "file-calls.jsonl"));

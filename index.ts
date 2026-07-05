@@ -37,6 +37,7 @@ export {
   loadJsonlFieldsSource,
 } from "./core/context-sources.ts";
 export {
+  allocateTurnId,
   appendSessionEvent,
   appendSessionFileCall,
   appendSessionMessage,

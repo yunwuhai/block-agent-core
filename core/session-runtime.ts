@@ -27,7 +27,7 @@ export interface SessionTaskRunnerDeps {
 }
 
 export interface SessionSendRequest {
-  requestKey?: string;
+  turnId: number;
   inputText: string;
   inputId: number;
   parentId?: number;
@@ -36,7 +36,7 @@ export interface SessionSendRequest {
 }
 
 export interface SessionTaskExecutionResult {
-  requestKey?: string;
+  turnId: number;
   model: PiSdkRunResult["model"];
   tools: string[];
   prompt: string;
@@ -45,6 +45,7 @@ export interface SessionTaskExecutionResult {
 }
 
 export interface CreatedInputArtifacts {
+  turnId: number;
   parentId?: number;
   inputMessage: SessionMessageRecord;
 }
@@ -123,20 +124,21 @@ export async function createInputMessage(
   cwd: string,
   sessionId: string,
   inputText: string,
-  requestKey?: string,
+  turnId: number,
   metadata?: Record<string, unknown>,
 ): Promise<CreatedInputArtifacts> {
   const parentId = await getCurrentParentSequence(cwd, sessionId);
 
   const inputMessage = await appendSessionMessage(cwd, sessionId, {
+    turnId,
     kind: "input",
     text: inputText,
     ...(parentId !== undefined ? { parentId } : {}),
-    ...(requestKey ? { requestKey } : {}),
     ...(metadata ? { metadata } : {}),
   });
 
   return {
+    turnId,
     ...(inputMessage.parentId !== undefined ? { parentId: inputMessage.parentId } : {}),
     inputMessage,
   };
@@ -179,7 +181,7 @@ export async function executeSessionTask(
 
   const sentMessageIds = [...historyContext.activeMessageIds, request.inputId];
   await appendSessionEvent(cwd, sessionId, {
-    ...(request.requestKey ? { requestKey: request.requestKey } : {}),
+    turnId: request.turnId,
     type: "send_started",
     payload: {
       inputId: request.inputId,
@@ -223,7 +225,7 @@ export async function executeSessionTask(
     kind: "reasoning",
     text: result.reasoningText,
     parentId: currentParentId,
-    ...(request.requestKey ? { requestKey: request.requestKey } : {}),
+    turnId: request.turnId,
   });
   outputMessageIds.push(reasoningMessage.id);
   currentParentId = reasoningMessage.id;
@@ -236,7 +238,7 @@ export async function executeSessionTask(
       params: trace.params,
       result: trace.result,
       error: Boolean(trace.metadata?.isError),
-      ...(request.requestKey ? { requestKey: request.requestKey } : {}),
+      turnId: request.turnId,
       ...(trace.metadata ? { metadata: trace.metadata } : {}),
     });
 
@@ -245,7 +247,7 @@ export async function executeSessionTask(
     const toolCallMessage = await appendSessionMessage(cwd, sessionId, {
       kind: "tool_call",
       parentId: currentParentId,
-      ...(request.requestKey ? { requestKey: request.requestKey } : {}),
+      turnId: request.turnId,
       toolCallId: toolCallRecord.id,
     });
     outputMessageIds.push(toolCallMessage.id);
@@ -255,12 +257,12 @@ export async function executeSessionTask(
     if (filePath && isFileAccessTool(trace.toolName)) {
       const fileCallRecord = await appendSessionFileCall(cwd, sessionId, {
         filePath,
-        ...(request.requestKey ? { requestKey: request.requestKey } : {}),
+        turnId: request.turnId,
       });
       const fileCallMessage = await appendSessionMessage(cwd, sessionId, {
         kind: "file_call",
         parentId: currentParentId,
-        ...(request.requestKey ? { requestKey: request.requestKey } : {}),
+        turnId: request.turnId,
         fileCallId: fileCallRecord.id,
       });
       outputMessageIds.push(fileCallMessage.id);
@@ -273,7 +275,7 @@ export async function executeSessionTask(
     const localId = sdkToLocalId.get(sdkId);
     if (localId !== undefined) {
       await appendSessionEvent(cwd, sessionId, {
-        ...(request.requestKey ? { requestKey: request.requestKey } : {}),
+        turnId: request.turnId,
         type: "tool_send_started",
         payload: { toolCallId: localId },
       });
@@ -283,7 +285,7 @@ export async function executeSessionTask(
     const localId = sdkToLocalId.get(sdkId);
     if (localId !== undefined) {
       await appendSessionEvent(cwd, sessionId, {
-        ...(request.requestKey ? { requestKey: request.requestKey } : {}),
+        turnId: request.turnId,
         type: "tool_send_finished",
         payload: { toolCallId: localId },
       });
@@ -294,14 +296,14 @@ export async function executeSessionTask(
     kind: "reply",
     text: result.replyText,
     parentId: currentParentId,
-    ...(request.requestKey ? { requestKey: request.requestKey } : {}),
+    turnId: request.turnId,
   });
   outputMessageIds.push(replyMessage.id);
 
   const activeMessageIds = [...historyContext.activeMessageIds, request.inputId, ...outputMessageIds];
 
   return {
-    ...(request.requestKey ? { requestKey: request.requestKey } : {}),
+    turnId: request.turnId,
     model: result.model,
     tools: result.tools,
     prompt: result.prompt,
