@@ -1,69 +1,68 @@
----
-name: dialogue-memory
-description: Persist and query structured conversation memory using JSONL-backed tables. Save conversation turns, tool calls, file references, templates, recipes, and build prompts. Every save produces a .md file and atomic JSONL records.
----
+# Block Agent Core Skill
 
-# Dialogue Memory
+Use this skill when you want to manage a persistent PI-backed session instead of making one-off subagent calls.
 
-Manage a structured conversation memory database. Store turns, tool calls, file references, templates, and call records as JSONL files with an atomic save orchestrator. Includes a recipe-based prompt builder.
+## Best fit
 
-## When to Use
+- You want to keep history across multiple sends.
+- You want to mount and unmount context blocks over time.
+- You want structured archives in JSONL files.
+- You want to inspect event logs after a send.
 
-- **Save a conversation turn** — use `saveTurn` to write a .md file + append to 4 JSONL tables atomically.
-- **Query past turns** — use `queryTurns`, `listTurns`, or `findRecentTurns` to retrieve conversation history by tags or IDs.
-- **Build a prompt** — use `buildPrompt` or `buildPromptFromRecipe` to assemble context from recipe zones around `{{CURRENT_TURN}}`.
-- **Track tool calls** — use `appendToolCall` / `queryToolCalls` for per-turn tool invocation records.
+## Preferred actions
 
-## Invocation
+### `create_session`
 
-### Named exports (core API — zero PI dependency)
+Create one persistent session with:
 
-| Function | Purpose |
-|----------|---------|
-| `saveTurn(params)` | Atomic turn save: renders .md + appends to turns, tool-calls, file-refs, call-records tables |
-| `appendTurn / getTurn / queryTurns / updateTurn` | Turn CRUD over JSONL |
-| `listTurns(tablePath)` | List all turns (convenience wrapper for `queryTurns(path, {})`) |
-| `findRecentTurns(dirPath, limit)` | Return last N turns across all JSONL files in a directory |
-| `appendToolCall / getToolCall / queryToolCalls / updateToolCall` | Tool call CRUD |
-| `appendTemplate / getTemplate / queryTemplates / updateTemplate` | Template CRUD |
-| `appendFileRef / getFileRef / queryFileRefs / updateFileRef` | File reference CRUD |
-| `appendCallRecord / getCallRecord / queryCallRecords / updateCallRecord` | Call record CRUD |
-| `loadRecipes / getRecipe / addRecipe / updateRecipe` | Recipe TOML CRUD |
-| `buildPrompt(recipePath, callRecord, resolver)` | Build a prompt from recipe zones |
-| `buildPromptFromRecipe(recipe, callRecord, resolver)` | Build a prompt from an already-loaded recipe |
+- `sessionId`
+- `systemPromptFilePaths`
+- `sdkMode`
+- optional `modelSelection`
+- optional `tools`
 
-### Default export (PI extension)
+### `mount_context`
 
-When loaded as a PI extension, registers the `dialogue_memory` tool with four actions: `save`, `load`, `query`, `manage`.
+Use when you want to add context before the next send.
 
-## Architecture
+Supports:
 
-```
-index.ts → dual export: default (PI extension) + named (core API)
+- `sources`
+- `seqRanges`
 
-core/       Pure functions, zero PI, zero I/O
-  turns.ts        Turn CRUD (append/get/query/update/list/findRecent)
-  tool-calls.ts   Tool call CRUD
-  templates.ts    Template CRUD
-  file-refs.ts    File reference CRUD
-  call-records.ts Call record CRUD
-  recipes.ts      Recipe TOML CRUD
-  build-prompt.ts Prompt assembly from recipe zones
-  save-turn.ts    Orchestrator: .md render + 4-table append
-  types.ts        Shared TypeScript types
+### `unmount_context`
 
-tool/       PI integration layer
-  dialogue-memory.ts   Registers dialogue_memory tool
-  actions/             Action handlers: load, save, query, manage
+Use when you want to remove active history.
 
-utils/      Shared helpers
-  jsonl.ts   JSONL read/append/write/update/delete (atomic .tmp + rename)
-  glob.ts    Glob pattern matching (** / * / ?)
-  toml.ts    TOML read/write (smol-toml)
-```
+Prefer:
 
-## Key Constraints
+- `seqRanges`
 
-- `core/` modules are pure functions — they accept file paths, delegate I/O to `utils/`.
-- JSONL files use atomic writes (`.tmp` + rename) for crash safety.
-- `tsconfig` enforces `verbatimModuleSyntax` and `exactOptionalPropertyTypes`.
+Compatibility cleanup is still possible with:
+
+- `mountIds`
+
+### `send_message`
+
+Use when you want to append one new input and run the session.
+
+Typical fields:
+
+- `sessionId`
+- `inputText`
+- optional `temporarySources`
+
+### `read_events`
+
+Use when you want to inspect lifecycle and tool activity.
+
+You can filter by:
+
+- `sessionId`
+- optional `turnId`
+
+## Storage model
+
+- `messages.jsonl` is the only context mainline (tool and file data inlined)
+- `events.jsonl` stores compact audit events
+- `system-config.json` stores fixed prompts and default PI settings

@@ -1,0 +1,141 @@
+import {
+  allocateTurnId,
+  appendSessionEvent,
+  readSessionConfig,
+} from "../../session/store.ts";
+import { readCurrentContextState } from "../../session/context-state.ts";
+import { nowIso } from "../../utils/datetime.ts";
+import { toNumberRanges } from "../../utils/range-utils.ts";
+import {
+  createInputMessage,
+  executeSessionTask,
+  rollbackCreatedInputArtifacts,
+  type SessionTaskRunnerDeps,
+} from "../../session/runtime.ts";
+import { getDefaultTaskScheduler, type TaskScheduler } from "../../session/task-scheduler.ts";
+import type { ContextSource } from "../../session/context-sources.ts";
+import type { ExtensionContextLike, ToolResponse } from "../shared.ts";
+import { error, ok } from "../shared.ts";
+
+export interface SendTaskParams {
+  sessionId: string;
+  inputText: string;
+  temporarySources?: ContextSource[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface SendTaskDeps extends SessionTaskRunnerDeps {
+  scheduler: TaskScheduler;
+}
+
+export async function handleSendMessage(
+  params: SendTaskParams,
+  ctx: ExtensionContextLike,
+  deps?: Partial<SendTaskDeps>,
+): Promise<ToolResponse> {
+  try {
+    await readSessionConfig(ctx.cwd, params.sessionId);
+    const previousState = await readCurrentContextState(ctx.cwd, params.sessionId);
+    const turnId = await allocateTurnId(ctx.cwd, params.sessionId);
+
+    const scheduler = deps?.scheduler ?? getDefaultTaskScheduler();
+    const runtimeDeps: SessionTaskRunnerDeps = {
+      composeContextText: deps?.composeContextText ?? (async (sources, separator) => {
+        const { composeContext } = await import("../../session/context-sources.ts");
+        return composeContext(sources, undefined, separator);
+      }),
+      runWithSdk: deps?.runWithSdk ?? (async (options) => {
+        const { runSubagentWithPiSdk } = await import("../../adapter/pi-sdk.ts");
+        return runSubagentWithPiSdk(options);
+      }),
+    };
+
+    const created = await createInputMessage(
+      ctx.cwd,
+      params.sessionId,
+      params.inputText,
+      turnId,
+      params.metadata,
+    );
+    const registeredAt = nowIso();
+
+    const { queuePosition } = scheduler.enqueue({
+      taskId: String(turnId),
+      sessionId: params.sessionId,
+      registeredAt: Date.now(),
+      execute: async () => {
+        try {
+          const result = await executeSessionTask(ctx.cwd, params.sessionId, {
+            turnId,
+            inputText: params.inputText,
+            inputId: created.inputMessage.id,
+            ...(created.parentId !== undefined ? { parentId: created.parentId } : {}),
+            ...(params.temporarySources ? { temporarySources: params.temporarySources } : {}),
+            ...(params.metadata ? { metadata: params.metadata } : {}),
+          }, ctx, runtimeDeps);
+
+          await appendSessionEvent(ctx.cwd, params.sessionId, {
+            turnId,
+            type: "send_finished",
+            payload: {
+              status: "completed",
+              inputId: created.inputMessage.id,
+              ...(created.parentId !== undefined ? { parentId: created.parentId } : {}),
+              outputMessageIdRanges: toNumberRanges(result.outputMessageIds),
+              activeMessageIdRanges: toNumberRanges(result.activeMessageIds),
+              model: result.model,
+              tools: result.tools,
+            },
+          });
+
+          await appendSessionEvent(ctx.cwd, params.sessionId, {
+            turnId,
+            type: "send_status",
+            payload: {
+              durationMs: result.durationMs,
+              ...(result.usage ? { ...result.usage } : {}),
+            },
+          });
+        } catch (err) {
+          await rollbackCreatedInputArtifacts(ctx.cwd, params.sessionId, created);
+          await appendSessionEvent(ctx.cwd, params.sessionId, {
+            turnId,
+            type: "send_finished",
+            payload: {
+              status: "failed",
+              inputId: created.inputMessage.id,
+              ...(created.parentId !== undefined ? { parentId: created.parentId } : {}),
+              activeMessageIdRanges: toNumberRanges(previousState.activeMessageIds),
+              errorMessage: (err as Error).message,
+            },
+          });
+        }
+      },
+    });
+
+    await appendSessionEvent(ctx.cwd, params.sessionId, {
+      turnId,
+      type: "send_enqueued",
+      payload: {
+        queuePosition,
+        registeredAt,
+        inputId: created.inputMessage.id,
+        ...(created.parentId !== undefined ? { parentId: created.parentId } : {}),
+      },
+    });
+
+    const send = {
+      sessionId: params.sessionId,
+      turnId,
+      status: "queued",
+      registeredAt,
+      queuePosition,
+      inputId: created.inputMessage.id,
+      ...(created.parentId !== undefined ? { parentId: created.parentId } : {}),
+    };
+    return ok(JSON.stringify({ send }, null, 2), { send });
+  } catch (err) {
+    return error(`Error sending message: ${(err as Error).message}`);
+  }
+}
+

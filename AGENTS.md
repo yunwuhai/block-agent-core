@@ -1,45 +1,46 @@
-# AGENTS.md — better-subagent
+# AGENTS.md - better-subagent
 
-The project is a **Dialogue Memory Database** — a CRUD library for conversation turns, tool calls, templates, file references, call records, and recipes, backed by JSONL persistence. Named exports provide a zero-PI-dependency core API; the default export is a PI extension factory.
+The project is now centered on **Block Agent Core**: a PI Coding Agent extension that assembles context blocks, runs PI SDK subagents, lists selectable models, and archives results into a predictable file layout. Named exports still expose reusable lower-level modules, but the main public runtime surface is the `block_agent_core` tool.
 
-## 核心规则
+## Core Rules
 
-### 读：先查文档
-需要了解项目结构、模块作用时，先查 `docs/user-manual.md`。源码在 `core/`、`tool/`、`utils/` 下，函数名和 JSDoc 清晰，可直接阅读。
+### Read docs first
+When you need project structure or module intent, start with `docs/user-manual.md`. The main implementation lives under `core/`, `tool/`, `adapter/`, and `utils/`.
 
-### 写：编辑代码 → 同步文档
-每次修改公共 API（新增/删除/重命名导出符号、修改函数签名）后，同步更新 `docs/user-manual.md` 中对应的 API 表格或架构描述。
+### Keep code and docs aligned
+Whenever you change the public API surface, tool actions, exported symbols, or result/archive shape, update `docs/user-manual.md` in the same change.
 
-| 层级 | 位置 | 内容 |
+| Layer | Path | Purpose |
 |------|------|------|
-| 用户手册 | `docs/user-manual.md` | 给 LLM 看的项目使用指南 |
-| L1 文件级 | `docs/L1-files/` | 每个文件的作用、每个导出符号的简介+行号 |
+| User manual | `docs/user-manual.md` | Main project guide for future agents |
+| Skill | `skills/better-subagent/SKILL.md` | PI-facing usage entry |
 
-## 开发命令
+## Dev Commands
 
 ```bash
-bun test          # 运行全部测试
-tsc --noEmit      # 类型检查
+bun test
+tsc --noEmit
 ```
 
-## 架构速览
+## Architecture At A Glance
 
-- `core/` — Pure function layer (zero PI dependency, zero I/O). A generic `crud-factory.ts` provides reusable CRUD logic for 5 entity types (turns, tool-calls, templates, file-refs, call-records). Also includes recipes (TOML), prompt building, save-turn orchestration, and shared types.
-- `tool/` — PI integration layer. Dialogue memory tool registration + action handlers (`actions/`).
-- `utils/` — Shared helpers: JSONL file I/O (read, append, update, delete with atomic writes), glob pattern matching, TOML I/O.
-- `index.ts` — Dual export: default (PI extension factory) + named (core CRUD API).
-- `skills/` — PI auto-discovered skill definitions.
+- `tool/` - Public PI tool registration and action dispatch for `block_agent_core`.
+- `tool/actions/` - The four public actions: `load_context`, `run_subagent`, `list_models`, `archive_result`.
+- `core/` - Reusable context composition, turn/model/tool shaping, archive helpers, and older persistence-oriented modules that are no longer the main public story.
+- `adapter/` - PI SDK integration and model registry bridging.
+- `utils/` - Shared file helpers such as JSONL persistence and TOML helpers.
+- `index.ts` - Default export registers the tool; named exports expose reusable modules.
 
-## 关键约束
+## Constraints
 
-- `tsconfig` 有 `exactOptionalPropertyTypes: true`、`verbatimModuleSyntax: true` — 不能用 `import X` 导入 type，必须 `import type`
-- `core/` 层禁止 `as any`、`@ts-ignore`、`@ts-expect-error`（`tool/` 适配层必要时可用 `as any`）
-- 测试文件与源文件同目录（如 `core/turns.test.ts`）
-- PI 扩展通过 symlink 部署：`ln -s $(pwd) ~/.pi/agent/extensions/better-subagent`
-- **Core purity**: `core/` modules must never import `fs`, `path`, or perform I/O. I/O is delegated to `utils/`.
+- Keep the formal extension entrypoint focused on `block_agent_core`; do not reintroduce `dialogue_memory` CRUD-style public actions.
+- Respect `exactOptionalPropertyTypes` and `verbatimModuleSyntax`; use `import type` for type-only imports.
+- `core/` should stay free of PI-specific imports.
+- `core/` should not use `as any`, `@ts-ignore`, or `@ts-expect-error`; keep unsafe adaptation isolated to the PI-facing tool layer when necessary.
+- Do not skip tests.
 
-## 不要做的事
+## Avoid
 
-- ❌ 改公共 API 不更新 `docs/user-manual.md`
-- ❌ 在测试文件中跳过测试（.skip / .todo）
-- ❌ 修改 `tsconfig.json` 的 strict 选项
+- Changing public behavior without updating `docs/user-manual.md`.
+- Reintroducing old CRUD-first runtime narratives in README, skill text, or tool registration.
+- Weakening TypeScript strictness.

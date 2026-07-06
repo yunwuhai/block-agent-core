@@ -13,10 +13,6 @@ dist/
 # Logs
 *.log
 
-# Test output & temporary files
-coverage/
-.tmp-*-test-*/
-
 # PI runtime data
 .pi/
 registry.jsonl
@@ -32,6 +28,8 @@ registry-calls.jsonl
 .opencode/
 .codex/
 .codegraph/
+.tmp-*/
+.tmp-debug-*/
 
 # Editor & OS files
 .vscode/
