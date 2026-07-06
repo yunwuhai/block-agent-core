@@ -97,7 +97,6 @@ Turn1 → Turn2A → Turn2A 回复
 block-agent-core/
 ├── src/
 │   ├── session/        # Session 系统核心 —— 持久化会话管理、PI SDK 执行引擎、上下文组装。项目当前的主要功能模块。
-│   ├── turn/           # Turn 系统（遗留）—— 基于回合的记录模型，管理模板、配方、工具调用记录。与 session 系统独立，无耦合。
 │   ├── adapter/        # 适配层 —— 封装 PI SDK 调用，提供统一的 runSubagentWithPiSdk 接口。
 │   ├── tool/           # MCP 工具层 —— block_agent_core 工具的注册、路由、action 处理器。
 │   │   └── actions/
@@ -111,7 +110,6 @@ block-agent-core/
 | 目录 | 说明 | README |
 |------|------|--------|
 | [`src/session/`](src/session/README.md) | Session 系统核心。持久化会话管理、PI SDK 执行引擎、上下文组装。这是项目当前的主要功能模块。 | [src/session/README.md](src/session/README.md) |
-| [`src/turn/`](src/turn/README.md) | Turn 系统（遗留）。基于回合的记录模型，管理模板、配方、工具调用记录。与 session 系统独立，无耦合。 | [src/turn/README.md](src/turn/README.md) |
 | [`src/adapter/`](src/adapter/README.md) | 适配层。封装 PI SDK 调用，提供统一的 `runSubagentWithPiSdk` 接口。 | [src/adapter/README.md](src/adapter/README.md) |
 | [`src/tool/`](src/tool/README.md) | MCP 工具层。`block_agent_core` 工具的注册、路由、action 处理器。 | [src/tool/README.md](src/tool/README.md) |
 | [`src/utils/`](src/utils/README.md) | 通用工具函数。JSONL 读写、日期格式化、数字范围序列化、glob 匹配、TOML 解析。 | [src/utils/README.md](src/utils/README.md) |
@@ -126,25 +124,24 @@ block-agent-core/
               │                      tool/                          │
               │   MCP 工具入口 —— 注册 block_agent_core 工具       │
               │   接收请求并路由到对应 action 处理器                │
-              └──────────┬──────────────────────────┬───────────────┘
-                         │                          │
-              ┌──────────▼──────────┐   ┌──────────▼──────────┐
-              │      session/       │   │       turn/          │
-              │   Session 系统核心   │   │  Turn 系统（遗留）    │
-              │   会话管理 / 执行引擎 │   │  回合记录 / 模板     │
-              │   上下文调度器        │   │  配方 / 工具调用      │
-              └──────────┬──────────┘   └──────────┬──────────┘
-                         │                          │
-              ┌──────────▼──────────────────────────▼──────────┐
-              │                 session/ + turn/                │
-              │    共享类型、prompt 构建、消息树、归档存储等      │
-              └──────────────────────┬─────────────────────────┘
-                         │                          │
-              ┌──────────▼──────────┐   ┌──────────▼──────────┐
-              │      adapter/       │   │       utils/         │
-              │  PI SDK 统一封装     │   │   JSONL / 日期 /     │
-              │  runSubagentWithPiSdk│   │   glob / TOML 等     │
-              └─────────────────────┘   └──────────────────────┘
+              └──────────────────────┬──────────────────────────────┘
+                                     │
+              ┌──────────────────────▼──────────────────────────────┐
+              │                     session/                        │
+              │              Session 系统核心                        │
+              │          会话管理 / 执行引擎 / 上下文调度器           │
+              └──────────────────────┬──────────────────────────────┘
+                                     │
+              ┌──────────────────────▼──────────────────────────────┐
+              │                     adapter/                        │
+              │               PI SDK 统一封装                        │
+              │             runSubagentWithPiSdk                     │
+              └──────────────────────┬──────────────────────────────┘
+                                     │
+              ┌──────────────────────▼──────────────────────────────┐
+              │                      utils/                         │
+              │              JSONL / 日期 / glob / TOML 等           │
+              └─────────────────────────────────────────────────────┘
 ```
 
 ---
