@@ -34,5 +34,5 @@
       ]
     }
   },
-  "include": ["index.ts", "core/**/*.ts", "tool/**/*.ts", "adapter/**/*.ts", "utils/**/*.ts", "*.test.ts"]
+  "include": ["src/index.ts", "src/**/*.ts"]
 }

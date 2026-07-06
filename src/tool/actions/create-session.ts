@@ -1,12 +1,15 @@
 import {
+  listContextMounts,
+  readCurrentContextState,
+} from "../../session/context-state.ts";
+import {
   createSession,
   createSessionLayout,
   listSessions,
   readSessionConfig,
-  type SessionSdkMode,
-  type StandaloneSdkOptions,
-} from "../../core/session-store.ts";
-import type { SubagentModelSelection, SubagentToolSelection } from "../../core/subagent-run.ts";
+} from "../../session/store.ts";
+import type { SessionSdkMode, StandaloneSdkOptions } from "../../session/types.ts";
+import type { SubagentModelSelection, SubagentToolSelection } from "../../session/subagent-run.ts";
 import type { ExtensionContextLike, ToolResponse } from "../shared.ts";
 import { error, ok } from "../shared.ts";
 
@@ -40,7 +43,6 @@ export async function handleGetSession(
 ): Promise<ToolResponse> {
   try {
     const config = await readSessionConfig(ctx.cwd, params.sessionId);
-    const { listContextMounts, readCurrentContextState } = await import("../../core/session-store.ts");
     const activeMounts = await listContextMounts(ctx.cwd, params.sessionId);
     const currentState = await readCurrentContextState(ctx.cwd, params.sessionId);
     return ok(JSON.stringify({

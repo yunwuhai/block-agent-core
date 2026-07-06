@@ -1,15 +1,17 @@
 import {
-  appendSessionEvent,
-  appendSessionMessage,
-  compressMessageRanges,
   getCurrentParentSequence,
   listContextMounts,
-  removeSessionMessagesById,
   readCurrentContextState,
+} from "./context-state.ts";
+import {
+  appendSessionEvent,
+  appendSessionMessage,
+  removeSessionMessagesById,
   readMessages,
   readSessionConfig,
-  type SessionMessageRecord,
-} from "./session-store.ts";
+} from "./store.ts";
+import type { SessionMessageRecord } from "./types.ts";
+import { toNumberRanges } from "../utils/range-utils.ts";
 import { composeContext, type ContextSource } from "./context-sources.ts";
 import { runSubagentWithPiSdk, type PiSdkRunOptions, type PiSdkRunResult } from "../adapter/pi-sdk.ts";
 import type { ExtensionContextLike } from "../tool/shared.ts";
@@ -149,14 +151,13 @@ export async function executeSessionTask(
     .filter(part => part.trim().length > 0)
     .join("\n\n");
 
-  const sentMessageIds = [...historyContext.activeMessageIds, request.inputId];
   await appendSessionEvent(cwd, sessionId, {
     turnId: request.turnId,
     type: "send_started",
     payload: {
       inputId: request.inputId,
       ...(request.parentId !== undefined ? { parentId: request.parentId } : {}),
-      sentMessageIdRanges: compressMessageRanges(sentMessageIds),
+      sentMessageIdRanges: toNumberRanges([...historyContext.activeMessageIds, request.inputId]),
       activeMountIds: activeMounts.map(mount => mount.id),
     },
   });

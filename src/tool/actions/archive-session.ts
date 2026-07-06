@@ -1,7 +1,5 @@
-import {
-  appendSessionMessage,
-  type SessionMessageRecord,
-} from "../../core/session-store.ts";
+import { appendSessionMessage } from "../../session/store.ts";
+import type { SessionMessageRecord } from "../../session/types.ts";
 import type { ExtensionContextLike, ToolResponse } from "../shared.ts";
 import { error, ok } from "../shared.ts";
 

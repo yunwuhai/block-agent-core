@@ -2,8 +2,8 @@ import {
   listContextMounts,
   mountContext,
   unmountContext,
-} from "../../core/session-store.ts";
-import type { ContextSource } from "../../core/context-sources.ts";
+} from "../../session/context-state.ts";
+import type { ContextSource } from "../../session/context-sources.ts";
 import type { ExtensionContextLike, ToolResponse } from "../shared.ts";
 import { error, ok } from "../shared.ts";
 
@@ -44,7 +44,7 @@ export async function handleListContextMounts(
 ): Promise<ToolResponse> {
   try {
     const mounts = await listContextMounts(ctx.cwd, params.sessionId);
-    const { readCurrentContextState } = await import("../../core/session-store.ts");
+    const { readCurrentContextState } = await import("../../session/context-state.ts");
     const state = await readCurrentContextState(ctx.cwd, params.sessionId);
     return ok(JSON.stringify({ mounts, activeMessageIds: state.activeMessageIds }, null, 2), {
       mounts,

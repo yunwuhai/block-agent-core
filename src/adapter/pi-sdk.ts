@@ -1,17 +1,17 @@
 import {
   type ToolCallTrace,
-} from "../core/archive-store.ts";
+} from "../session/archive-store.ts";
 import { access, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { buildSubagentPrompt } from "../core/pi-config.ts";
+import { buildSubagentPrompt } from "../session/pi-config.ts";
 import {
   normalizeToolNames,
   type SubagentModelSelection,
   type SubagentRunRequest,
-} from "../core/subagent-run.ts";
-import type { SessionSdkMode, StandaloneSdkOptions } from "../core/session-store.ts";
+} from "../session/subagent-run.ts";
+import type { SessionSdkMode, StandaloneSdkOptions } from "../session/types.ts";
 
 export interface PiModel {
   provider: string;
@@ -35,14 +35,6 @@ export type ToolDefinition = unknown;
 async function importPiCodingAgentSdk(sdkModulePath?: string): Promise<any> {
   if (sdkModulePath) {
     return import(pathToFileURL(sdkModulePath).href);
-  }
-  try {
-    const resolved = await import.meta.resolve("@earendil-works/pi-coding-agent");
-    if (typeof resolved === "string" && resolved.startsWith("file:///")) {
-      return await import(resolved);
-    }
-  } catch {
-    // Fall back to normal import and runtime scans below.
   }
   try {
     return await import("@earendil-works/pi-coding-agent");
@@ -249,13 +241,15 @@ export async function runSubagentWithPiSdk(options: PiSdkRunOptions): Promise<Pi
 
   let runtimeModelRegistry = options.modelRegistry;
   let runtimeCurrentModel = options.currentModel;
-  let pi = options.piSdkModule ?? await importPiCodingAgentSdk(options.sdkOptions?.sdkModulePath);
+  let pi: any;
 
   if (options.sdkMode === "standalone-sdk") {
     const standalone = await createStandaloneRuntime(options.sdkOptions, options.modelSelection);
     runtimeModelRegistry = standalone.modelRegistry;
     runtimeCurrentModel = standalone.currentModel;
     pi = standalone.sdkModule;
+  } else {
+    pi = options.piSdkModule ?? await importPiCodingAgentSdk(options.sdkOptions?.sdkModulePath);
   }
 
   const { createAgentSession, SessionManager } = pi;
@@ -271,15 +265,11 @@ export async function runSubagentWithPiSdk(options: PiSdkRunOptions): Promise<Pi
       : promptInput,
   );
 
-  const sessionOptions = {
+  const createSessionOpts = {
     modelRegistry: runtimeModelRegistry,
     model,
     tools,
     sessionManager: SessionManager.inMemory(),
-  };
-
-  const createSessionOpts: Record<string, unknown> = {
-    ...sessionOptions,
     ...(options.cwd ? { cwd: options.cwd } : {}),
     ...(options.agentDir ? { agentDir: options.agentDir } : {}),
     ...(options.authStorage ? { authStorage: options.authStorage } : {}),
@@ -340,12 +330,11 @@ export async function runSubagentWithPiSdk(options: PiSdkRunOptions): Promise<Pi
     }
 
     if (event.type === "tool_execution_end") {
-      const existing = pendingToolCalls.get(event.toolCallId) ?? createToolTraceFromStart({
-        toolCallId: event.toolCallId,
-        toolName: event.toolName,
-        args: {},
-      });
-      const finalized = finalizeToolTrace(existing, event, `${options.runId}:reply`);
+      const existing = pendingToolCalls.get(event.toolCallId);
+      if (!existing) {
+        console.warn(`[block-agent-core] tool_execution_end received without matching start: ${event.toolCallId}`);
+      }
+      const finalized = finalizeToolTrace(existing ?? createToolTraceFromStart({toolCallId: event.toolCallId, toolName: event.toolName, args: {}}), event, `${options.runId}:reply`);
       finishedToolCalls.push(finalized);
       pendingToolCalls.delete(event.toolCallId);
       void options.onEvent?.({

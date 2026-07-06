@@ -16,21 +16,21 @@ export default async function (pi: import("@earendil-works/pi-coding-agent").Ext
 // Named exports: reusable core API
 export { nowIso } from "./utils/datetime.ts";
 export { toNumberRanges, fromNumberRanges, normalizeRanges } from "./utils/range-utils.ts";
-export { buildChildrenMap, collectDescendantIds, removeIdsAndDescendants } from "./core/message-tree.ts";
-export { appendTurn, getTurn, queryTurns, updateTurn, listTurns, findRecentTurns } from "./core/turns.ts";
-export { appendToolCall, getToolCall, queryToolCalls, updateToolCall } from "./core/tool-calls.ts";
-export { appendTemplate, getTemplate, queryTemplates, updateTemplate } from "./core/templates.ts";
-export { appendFileRef, getFileRef, queryFileRefs, updateFileRef } from "./core/file-refs.ts";
-export { appendCallRecord, getCallRecord, queryCallRecords, updateCallRecord } from "./core/call-records.ts";
-export { loadRecipes, getRecipe, addRecipe, updateRecipe } from "./core/recipes.ts";
-export { buildPrompt, buildPromptFromRecipe } from "./core/build-prompt.ts";
-export { saveTurn } from "./core/save-turn.ts";
+export { buildChildrenMap, collectDescendantIds, removeIdsAndDescendants } from "./session/message-tree.ts";
+export { appendTurn, getTurn, queryTurns, updateTurn, listTurns, findRecentTurns } from "./turn/turns.ts";
+export { appendToolCall, getToolCall, queryToolCalls, updateToolCall } from "./turn/tool-calls.ts";
+export { appendTemplate, getTemplate, queryTemplates, updateTemplate } from "./turn/templates.ts";
+export { appendFileRef, getFileRef, queryFileRefs, updateFileRef } from "./turn/file-refs.ts";
+export { appendCallRecord, getCallRecord, queryCallRecords, updateCallRecord } from "./turn/call-records.ts";
+export { loadRecipes, getRecipe, addRecipe, updateRecipe } from "./turn/recipes.ts";
+export { buildPrompt, buildPromptFromRecipe } from "./turn/build-prompt.ts";
+export { saveTurn } from "./turn/save-turn.ts";
 export {
   normalizeToolNames,
   PI_BUILTIN_TOOLS,
   PI_DEFAULT_SUBAGENT_TOOLS,
   usesOnlyBuiltinTools,
-} from "./core/subagent-run.ts";
+} from "./session/subagent-run.ts";
 export {
   composeContext,
   createContextLoaderRegistry,
@@ -38,58 +38,60 @@ export {
   loadContextSources,
   loadFileSliceSource,
   loadJsonlFieldsSource,
-} from "./core/context-sources.ts";
+} from "./session/context-sources.ts";
+export {
+  getCurrentParentSequence,
+  listContextMounts,
+  mountContext,
+  readCurrentContextState,
+  readLatestSendSnapshot,
+  unmountContext,
+} from "./session/context-state.ts";
 export {
   allocateTurnId,
   appendSessionEvent,
   appendSessionMessage,
-  compressMessageRanges,
   createSession,
   createSessionLayout,
   createSessionsRootDir,
-  expandMessageIdRanges,
-  getCurrentParentSequence,
-  listContextMounts,
   listSessions,
-  mountContext,
-  readCurrentContextState,
   readEvents,
-  readLatestSendSnapshot,
   readMessages,
   readSessionConfig,
-  unmountContext,
   updateSessionConfig,
   writeSessionConfig,
-} from "./core/session-store.ts";
+} from "./session/store.ts";
+export type * from "./session/types.ts";
+export type * from "./session/context-state.ts";
 export {
   createInputMessage,
   executeSessionTask,
-} from "./core/session-runtime.ts";
+} from "./session/runtime.ts";
 export {
   getDefaultTaskScheduler,
   TaskScheduler,
-} from "./core/task-scheduler.ts";
+} from "./session/task-scheduler.ts";
 export {
   buildSubagentInvocation,
   buildSubagentPrompt,
-} from "./core/pi-config.ts";
+} from "./session/pi-config.ts";
 export {
   appendMessageRecord,
   createArchiveLayout,
   createDefaultArchiveRootDir,
   registerExternalFileAccess,
   saveSubagentResult,
-} from "./core/archive-store.ts";
+} from "./session/archive-store.ts";
 export {
   importPiModelRegistryFromStandalone,
   listPiModels,
   resolvePiModel,
   runSubagentWithPiSdk,
 } from "./adapter/pi-sdk.ts";
-export type * from "./core/types.ts";
-export type * from "./core/context-sources.ts";
-export type * from "./core/pi-config.ts";
-export type * from "./core/archive-store.ts";
-export type * from "./core/session-store.ts";
-export type * from "./core/subagent-run.ts";
+export type * from "./turn/types.ts";
+export type * from "./session/context-sources.ts";
+export type * from "./session/pi-config.ts";
+export type * from "./session/archive-store.ts";
+export type * from "./session/store.ts";
+export type * from "./session/subagent-run.ts";
 export type * from "./adapter/pi-sdk.ts";

@@ -2,15 +2,17 @@ import { afterAll, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  appendSessionMessage,
   createSession,
+  readSessionConfig,
+  readMessages,
+  appendSessionMessage,
+} from "./store.ts";
+import {
   listContextMounts,
   mountContext,
   readCurrentContextState,
-  readSessionConfig,
-  readMessages,
   unmountContext,
-} from "./session-store.ts";
+} from "./context-state.ts";
 
 const tmpDir = mkdtempSync(join(process.cwd(), ".tmp-session-store-test-"));
 
@@ -83,7 +85,7 @@ describe("session store", () => {
     await appendSessionMessage(tmpDir, "session-unmount", { id: 3, kind: "reply", text: "c", parentId: 2 });
     await appendSessionMessage(tmpDir, "session-unmount", { id: 4, kind: "reply", text: "d", parentId: 3 });
 
-    const { appendSessionEvent } = await import("./session-store.ts");
+    const { appendSessionEvent } = await import("./store.ts");
     await appendSessionEvent(tmpDir, "session-unmount", {
       type: "send_finished",
       payload: {
@@ -108,7 +110,8 @@ describe("session store", () => {
       sdkMode: "host-inherit",
     });
 
-    const { appendSessionEvent, mountContext: mount } = await import("./session-store.ts");
+    const { appendSessionEvent } = await import("./store.ts");
+    const { mountContext: mount } = await import("./context-state.ts");
     await appendSessionEvent(tmpDir, "session-missing-remount", {
       type: "send_finished",
       payload: {
