@@ -1,19 +1,19 @@
 import {
   allocateTurnId,
   appendSessionEvent,
-  compressMessageRanges,
-  readCurrentContextState,
   readSessionConfig,
-} from "../../core/session-store.ts";
+} from "../../session/store.ts";
+import { readCurrentContextState } from "../../session/context-state.ts";
 import { nowIso } from "../../utils/datetime.ts";
+import { toNumberRanges } from "../../utils/range-utils.ts";
 import {
   createInputMessage,
   executeSessionTask,
   rollbackCreatedInputArtifacts,
   type SessionTaskRunnerDeps,
-} from "../../core/session-runtime.ts";
-import { getDefaultTaskScheduler, type TaskScheduler } from "../../core/task-scheduler.ts";
-import type { ContextSource } from "../../core/context-sources.ts";
+} from "../../session/runtime.ts";
+import { getDefaultTaskScheduler, type TaskScheduler } from "../../session/task-scheduler.ts";
+import type { ContextSource } from "../../session/context-sources.ts";
 import type { ExtensionContextLike, ToolResponse } from "../shared.ts";
 import { error, ok } from "../shared.ts";
 
@@ -41,7 +41,7 @@ export async function handleSendMessage(
     const scheduler = deps?.scheduler ?? getDefaultTaskScheduler();
     const runtimeDeps: SessionTaskRunnerDeps = {
       composeContextText: deps?.composeContextText ?? (async (sources, separator) => {
-        const { composeContext } = await import("../../core/context-sources.ts");
+        const { composeContext } = await import("../../session/context-sources.ts");
         return composeContext(sources, undefined, separator);
       }),
       runWithSdk: deps?.runWithSdk ?? (async (options) => {
@@ -81,8 +81,8 @@ export async function handleSendMessage(
               status: "completed",
               inputId: created.inputMessage.id,
               ...(created.parentId !== undefined ? { parentId: created.parentId } : {}),
-              outputMessageIdRanges: compressMessageRanges(result.outputMessageIds),
-              activeMessageIdRanges: compressMessageRanges(result.activeMessageIds),
+              outputMessageIdRanges: toNumberRanges(result.outputMessageIds),
+              activeMessageIdRanges: toNumberRanges(result.activeMessageIds),
               model: result.model,
               tools: result.tools,
             },
@@ -105,7 +105,7 @@ export async function handleSendMessage(
               status: "failed",
               inputId: created.inputMessage.id,
               ...(created.parentId !== undefined ? { parentId: created.parentId } : {}),
-              activeMessageIdRanges: compressMessageRanges(previousState.activeMessageIds),
+              activeMessageIdRanges: toNumberRanges(previousState.activeMessageIds),
               errorMessage: (err as Error).message,
             },
           });
@@ -139,4 +139,3 @@ export async function handleSendMessage(
   }
 }
 
-export const handleSendTask = handleSendMessage;

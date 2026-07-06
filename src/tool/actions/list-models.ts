@@ -1,5 +1,5 @@
 import { listPiModels, importPiModelRegistryFromStandalone } from "../../adapter/pi-sdk.ts";
-import type { StandaloneSdkOptions } from "../../core/session-store.ts";
+import type { StandaloneSdkOptions } from "../../session/types.ts";
 import type { ExtensionContextLike, ToolResponse } from "../shared.ts";
 import { error } from "../shared.ts";
 

@@ -5,13 +5,13 @@ import {
   createSession,
   readEvents,
   readMessages,
-} from "./session-store.ts";
+} from "./store.ts";
 import {
   createInputMessage,
   executeSessionTask,
   rollbackCreatedInputArtifacts,
   type SessionTaskRunnerDeps,
-} from "./session-runtime.ts";
+} from "./runtime.ts";
 
 const tmpDir = mkdtempSync(join(process.cwd(), ".tmp-session-runtime-test-"));
 

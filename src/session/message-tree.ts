@@ -1,5 +1,5 @@
 import { fromNumberRanges } from "../utils/range-utils.ts";
-import type { SessionMessageRecord } from "./session-store.ts";
+import type { SessionMessageRecord } from "./types.ts";
 
 export function buildChildrenMap(messages: SessionMessageRecord[]): Map<number, number[]> {
   const map = new Map<number, number[]>();

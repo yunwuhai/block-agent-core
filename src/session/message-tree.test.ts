@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { buildChildrenMap, collectDescendantIds, removeIdsAndDescendants } from "./message-tree.ts";
-import type { SessionMessageRecord } from "./session-store.ts";
+import type { SessionMessageRecord } from "./types.ts";
 
 function msg(
   id: number,

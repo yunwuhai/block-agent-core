@@ -1,4 +1,4 @@
-import { readEvents } from "../../core/session-store.ts";
+import { readEvents } from "../../session/store.ts";
 import type { ExtensionContextLike, ToolResponse } from "../shared.ts";
 import { error, ok } from "../shared.ts";
 

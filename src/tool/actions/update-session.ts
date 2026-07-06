@@ -1,10 +1,9 @@
 import {
   createSessionLayout,
   updateSessionConfig,
-  type SessionSdkMode,
-  type StandaloneSdkOptions,
-} from "../../core/session-store.ts";
-import type { SubagentModelSelection, SubagentToolSelection } from "../../core/subagent-run.ts";
+} from "../../session/store.ts";
+import type { SessionSdkMode, StandaloneSdkOptions } from "../../session/types.ts";
+import type { SubagentModelSelection, SubagentToolSelection } from "../../session/subagent-run.ts";
 import type { ExtensionContextLike, ToolResponse } from "../shared.ts";
 import { error, ok } from "../shared.ts";
 

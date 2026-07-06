@@ -4,6 +4,16 @@
 
 ---
 
+## 目录
+
+- [特点](#特点)
+- [目录结构](#目录结构)
+- [快速开始](#快速开始)
+- [工具接口](#工具接口)
+- [许可证](#许可证)
+
+---
+
 ## 特点
 
 ### 1. 会话即文件，零依赖存储
@@ -81,23 +91,61 @@ Turn1 → Turn2A → Turn2A 回复
 
 ---
 
-## 前景
+## 目录结构
 
-### 短期方向
+```
+block-agent-core/
+├── src/
+│   ├── session/        # Session 系统核心 —— 持久化会话管理、PI SDK 执行引擎、上下文组装。项目当前的主要功能模块。
+│   ├── turn/           # Turn 系统（遗留）—— 基于回合的记录模型，管理模板、配方、工具调用记录。与 session 系统独立，无耦合。
+│   ├── adapter/        # 适配层 —— 封装 PI SDK 调用，提供统一的 runSubagentWithPiSdk 接口。
+│   ├── tool/           # MCP 工具层 —— block_agent_core 工具的注册、路由、action 处理器。
+│   │   └── actions/
+│   ├── utils/          # 通用工具函数 —— JSONL 读写、日期格式化、数字范围序列化、glob 匹配、TOML 解析。
+│   └── index.ts        # 公共 API 出口
+├── docs/               # 用户手册与文档。
+├── skills/             # PI 技能定义（如 better-subagent）。
+└── reports/            # 审计与设计报告。
+```
 
-- **Session 分叉**：从任意历史点 fork 出独立 session，支持并行实验
-- **命名检查点**：为上下文状态打标签，支持 git-like 回退
-- **调度器持久化**：进程重启后恢复未完成的任务
-- **幂等键**：防止 SDK 重连导致工具调用重复执行
-- **上下文窗口预算**：自动压缩超出模型窗口的消息
+| 目录 | 说明 | README |
+|------|------|--------|
+| [`src/session/`](src/session/README.md) | Session 系统核心。持久化会话管理、PI SDK 执行引擎、上下文组装。这是项目当前的主要功能模块。 | [src/session/README.md](src/session/README.md) |
+| [`src/turn/`](src/turn/README.md) | Turn 系统（遗留）。基于回合的记录模型，管理模板、配方、工具调用记录。与 session 系统独立，无耦合。 | [src/turn/README.md](src/turn/README.md) |
+| [`src/adapter/`](src/adapter/README.md) | 适配层。封装 PI SDK 调用，提供统一的 `runSubagentWithPiSdk` 接口。 | [src/adapter/README.md](src/adapter/README.md) |
+| [`src/tool/`](src/tool/README.md) | MCP 工具层。`block_agent_core` 工具的注册、路由、action 处理器。 | [src/tool/README.md](src/tool/README.md) |
+| [`src/utils/`](src/utils/README.md) | 通用工具函数。JSONL 读写、日期格式化、数字范围序列化、glob 匹配、TOML 解析。 | [src/utils/README.md](src/utils/README.md) |
+| [`docs/`](docs/README.md) | 用户手册与文档。 | [docs/README.md](docs/README.md) |
+| [`skills/`](skills/README.md) | PI 技能定义目录。 | [skills/README.md](skills/README.md) |
+| [`reports/`](reports/README.md) | 审计与设计报告。 | [reports/README.md](reports/README.md) |
 
-### 长期方向
+### 模块职责速览
 
-- **并行子 Session**：从父 session fork 多个子 session 并行执行后汇合（fan-out / gather）
-- **人机协作**：关键操作暂停等待人工审批（HITL）
-- **策略引擎**：按规则限制工具使用（如"生产环境禁止 bash"）
-- **成本追踪**：按 session 设定 token 预算，超支自动降级
-- **分布式追踪**：跨 session 和工具调用的链路追踪（OpenTelemetry）
+```
+              ┌─────────────────────────────────────────────────────┐
+              │                      tool/                          │
+              │   MCP 工具入口 —— 注册 block_agent_core 工具       │
+              │   接收请求并路由到对应 action 处理器                │
+              └──────────┬──────────────────────────┬───────────────┘
+                         │                          │
+              ┌──────────▼──────────┐   ┌──────────▼──────────┐
+              │      session/       │   │       turn/          │
+              │   Session 系统核心   │   │  Turn 系统（遗留）    │
+              │   会话管理 / 执行引擎 │   │  回合记录 / 模板     │
+              │   上下文调度器        │   │  配方 / 工具调用      │
+              └──────────┬──────────┘   └──────────┬──────────┘
+                         │                          │
+              ┌──────────▼──────────────────────────▼──────────┐
+              │                 session/ + turn/                │
+              │    共享类型、prompt 构建、消息树、归档存储等      │
+              └──────────────────────┬─────────────────────────┘
+                         │                          │
+              ┌──────────▼──────────┐   ┌──────────▼──────────┐
+              │      adapter/       │   │       utils/         │
+              │  PI SDK 统一封装     │   │   JSONL / 日期 /     │
+              │  runSubagentWithPiSdk│   │   glob / TOML 等     │
+              └─────────────────────┘   └──────────────────────┘
+```
 
 ---
 

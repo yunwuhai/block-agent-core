@@ -8,7 +8,7 @@ import { handleCreateSession } from "./actions/create-session.ts";
 import { handleUpdateSession } from "./actions/update-session.ts";
 import { handleListContextMounts, handleMountContext, handleUnmountContext } from "./actions/context-mounts.ts";
 import { readJsonl } from "../utils/jsonl.ts";
-import { TaskScheduler, resetDefaultTaskSchedulerForTests } from "../core/task-scheduler.ts";
+import { TaskScheduler, resetDefaultTaskSchedulerForTests } from "../session/task-scheduler.ts";
 
 const tmpDir = mkdtempSync(join(process.cwd(), ".tmp-block-agent-core-test-"));
 
@@ -210,7 +210,7 @@ describe("session-first actions", () => {
       tools: { names: ["read"] },
     }, createCtx());
 
-    const { appendSessionMessage, appendSessionEvent } = await import("../core/session-store.ts");
+    const { appendSessionMessage, appendSessionEvent } = await import("../session/store.ts");
     await appendSessionMessage(tmpDir, "session-range", { id: 1, kind: "input", text: "A" });
     await appendSessionMessage(tmpDir, "session-range", { id: 2, kind: "reply", text: "B", parentId: 1 });
     await appendSessionMessage(tmpDir, "session-range", { id: 3, kind: "reply", text: "C", parentId: 2 });
