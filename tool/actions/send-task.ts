@@ -21,7 +21,6 @@ export interface SendTaskParams {
   sessionId: string;
   inputText: string;
   temporarySources?: ContextSource[];
-  timeoutMs?: number;
   metadata?: Record<string, unknown>;
 }
 
@@ -72,7 +71,6 @@ export async function handleSendMessage(
             inputId: created.inputMessage.id,
             ...(created.parentId !== undefined ? { parentId: created.parentId } : {}),
             ...(params.temporarySources ? { temporarySources: params.temporarySources } : {}),
-            ...(params.timeoutMs ? { timeoutMs: params.timeoutMs } : {}),
             ...(params.metadata ? { metadata: params.metadata } : {}),
           }, ctx, runtimeDeps);
 
@@ -87,6 +85,15 @@ export async function handleSendMessage(
               activeMessageIdRanges: compressMessageRanges(result.activeMessageIds),
               model: result.model,
               tools: result.tools,
+            },
+          });
+
+          await appendSessionEvent(ctx.cwd, params.sessionId, {
+            turnId,
+            type: "send_status",
+            payload: {
+              durationMs: result.durationMs,
+              ...(result.usage ? { ...result.usage } : {}),
             },
           });
         } catch (err) {

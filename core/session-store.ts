@@ -40,7 +40,6 @@ export interface SessionSystemConfig {
   systemPromptText: string;
   sdkMode: SessionSdkMode;
   nextTurnId: number;
-  defaultTimeoutMs?: number;
   modelSelection?: SubagentModelSelection;
   tools?: SubagentToolSelection;
   sdkOptions?: StandaloneSdkOptions;
@@ -287,7 +286,6 @@ export async function updateSessionConfig(
   patch: {
     systemPromptFilePaths?: string[];
     sdkMode?: SessionSdkMode;
-    defaultTimeoutMs?: number;
     modelSelection?: SubagentModelSelection;
     tools?: SubagentToolSelection;
     sdkOptions?: StandaloneSdkOptions;
@@ -298,7 +296,6 @@ export async function updateSessionConfig(
     ...current,
     ...(patch.systemPromptFilePaths ? { systemPromptFilePaths: [...patch.systemPromptFilePaths] } : {}),
     ...(patch.sdkMode ? { sdkMode: patch.sdkMode } : {}),
-    ...(patch.defaultTimeoutMs !== undefined ? { defaultTimeoutMs: patch.defaultTimeoutMs } : {}),
     ...(patch.modelSelection ? { modelSelection: patch.modelSelection } : {}),
     ...(patch.tools ? { tools: patch.tools } : {}),
     ...(patch.sdkOptions ? { sdkOptions: patch.sdkOptions } : {}),
@@ -310,7 +307,6 @@ export async function updateSessionConfig(
     payload: {
       ...(patch.systemPromptFilePaths ? { systemPromptFilePaths: patch.systemPromptFilePaths } : {}),
       ...(patch.sdkMode ? { sdkMode: patch.sdkMode } : {}),
-      ...(patch.defaultTimeoutMs !== undefined ? { defaultTimeoutMs: patch.defaultTimeoutMs } : {}),
       ...(patch.modelSelection ? { modelSelection: patch.modelSelection } : {}),
       ...(patch.tools ? { tools: patch.tools } : {}),
       ...(patch.sdkOptions ? { sdkOptions: patch.sdkOptions } : {}),
@@ -376,8 +372,8 @@ export async function appendSessionEvent(
     const fullRecord: SessionEventRecord = {
       ...(turnId !== undefined ? { turnId } : {}),
       id: callerId ?? await getNextId(layout.eventsPath),
-      createdAt: nowIso(),
       ...rest,
+      createdAt: nowIso(),
     };
     await appendJsonl(layout.eventsPath, fullRecord);
     return fullRecord;

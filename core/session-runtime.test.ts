@@ -3,8 +3,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   createSession,
+  readEvents,
   readMessages,
-  updateSessionConfig,
 } from "./session-store.ts";
 import {
   createInputMessage,
@@ -186,23 +186,36 @@ describe("executeSessionTask", () => {
   it("records tool_call messages with timestamps", async () => {
     await setupSession("timestamp-test");
     const created = await createInputMessage(tmpDir, "timestamp-test", "test", 1);
+    const toolCalls = [{
+      id: "tool-1",
+      messageId: "",
+      toolName: "read",
+      params: { path: "/tmp/f.txt" },
+      result: "ok",
+      metadata: { isError: false },
+    }];
     const deps = mockDeps({
-      runWithSdk: async () => ({
-        runId: "test",
-        model: { provider: "test", modelId: "test", displayName: "Test", reasoning: false, input: [], available: true },
-        tools: ["read"],
-        prompt: "test",
-        reasoningText: "...",
-        replyText: "done.",
-        toolCalls: [{
-          id: "tool-1",
-          messageId: "",
-          toolName: "read",
-          params: { path: "/tmp/f.txt" },
-          result: "ok",
-          metadata: { isError: false },
-        }],
-      }),
+      runWithSdk: async (opts) => {
+        for (const tc of toolCalls) {
+          await opts.onEvent?.({
+            type: "tool_call_started",
+            payload: { toolCallId: tc.id, toolName: tc.toolName, args: tc.params } as any,
+          });
+          await opts.onEvent?.({
+            type: "tool_call_finished",
+            payload: { toolCallId: tc.id, toolName: tc.toolName, result: tc.result, isError: tc.metadata?.isError ?? false } as any,
+          });
+        }
+        return {
+          runId: "test",
+          model: { provider: "test", modelId: "test", displayName: "Test", reasoning: false, input: [], available: true },
+          tools: ["read"],
+          prompt: "test",
+          reasoningText: "...",
+          replyText: "done.",
+          toolCalls,
+        };
+      },
     });
 
     await executeSessionTask(tmpDir, "timestamp-test", {
@@ -212,16 +225,17 @@ describe("executeSessionTask", () => {
       ...(created.parentId !== undefined ? { parentId: created.parentId } : {}),
     }, mockCtx, deps);
 
-    const messages = await readMessages(tmpDir, "timestamp-test");
-    const toolCalls = messages.filter(m => m.kind === "tool_call");
-    expect(typeof toolCalls[0]!.finishedAt).toBe("string");
+    const events = await readEvents(tmpDir, "timestamp-test");
+    const finishedEvent = events.find(e => e.type === "tool_send_finished");
+    expect(finishedEvent).toBeDefined();
+    expect(typeof finishedEvent!.payload.finishedAt).toBe("string");
   });
 
-  // ── T1-4: Token 用量统计（记录在 reply message 上）─────────────────────
+  // ── T1-4: Token 用量统计（记录在 executeSessionTask 返回值中）─────────────
 
-  it("T1-4: reply message carries per-turn usage when SDK provides it", async () => {
-    await setupSession("usage-reply-test");
-    const created = await createInputMessage(tmpDir, "usage-reply-test", "test", 1);
+  it("T1-4: executeSessionTask returns usage when SDK provides it", async () => {
+    await setupSession("usage-return-test");
+    const created = await createInputMessage(tmpDir, "usage-return-test", "test", 1);
     const deps = mockDeps({
       runWithSdk: async () => ({
         runId: "test",
@@ -235,22 +249,20 @@ describe("executeSessionTask", () => {
       }),
     });
 
-    await executeSessionTask(tmpDir, "usage-reply-test", {
+    const result = await executeSessionTask(tmpDir, "usage-return-test", {
       turnId: 1,
       inputText: "test",
       inputId: created.inputMessage.id,
       ...(created.parentId !== undefined ? { parentId: created.parentId } : {}),
     }, mockCtx, deps);
 
-    const messages = await readMessages(tmpDir, "usage-reply-test");
-    const reply = messages.filter(m => m.kind === "reply");
-    expect(reply.length).toBeGreaterThanOrEqual(1);
-    expect(reply[reply.length - 1]!.usage).toEqual({ inputTokens: 200, outputTokens: 80 });
+    expect(result.usage).toEqual({ inputTokens: 200, outputTokens: 80 });
+    expect(result.durationMs).toBeGreaterThanOrEqual(0);
   });
 
-  it("T1-4: reply message has no usage when SDK does not provide it", async () => {
-    await setupSession("no-usage-test");
-    const created = await createInputMessage(tmpDir, "no-usage-test", "test", 1);
+  it("T1-4: executeSessionTask returns no usage when SDK does not provide it", async () => {
+    await setupSession("no-usage-return-test");
+    const created = await createInputMessage(tmpDir, "no-usage-return-test", "test", 1);
     const deps = mockDeps({
       runWithSdk: async () => ({
         runId: "test",
@@ -264,178 +276,79 @@ describe("executeSessionTask", () => {
       }),
     });
 
-    await executeSessionTask(tmpDir, "no-usage-test", {
+    const result = await executeSessionTask(tmpDir, "no-usage-return-test", {
       turnId: 1,
       inputText: "test",
       inputId: created.inputMessage.id,
       ...(created.parentId !== undefined ? { parentId: created.parentId } : {}),
     }, mockCtx, deps);
 
-    const messages = await readMessages(tmpDir, "no-usage-test");
-    const reply = messages.filter(m => m.kind === "reply");
-    expect(reply[reply.length - 1]!.usage).toBeUndefined();
+    expect(result.usage).toBeUndefined();
+    expect(result.durationMs).toBeGreaterThanOrEqual(0);
   });
 
   // ── T1-5: 执行时间记录（turn 级别在 reply 上，tool 级别在 tool_call 上）─
 
-  it("T1-5: reply message carries durationMs", async () => {
-    await setupSession("duration-reply-test");
-    const created = await createInputMessage(tmpDir, "duration-reply-test", "test", 1);
+  it("T1-5: executeSessionTask returns durationMs", async () => {
+    await setupSession("duration-return-test");
+    const created = await createInputMessage(tmpDir, "duration-return-test", "test", 1);
 
-    await executeSessionTask(tmpDir, "duration-reply-test", {
+    const result = await executeSessionTask(tmpDir, "duration-return-test", {
       turnId: 1,
       inputText: "test",
       inputId: created.inputMessage.id,
       ...(created.parentId !== undefined ? { parentId: created.parentId } : {}),
     }, mockCtx, mockDeps());
 
-    const messages = await readMessages(tmpDir, "duration-reply-test");
-    const reply = messages.filter(m => m.kind === "reply");
-    expect(typeof reply[reply.length - 1]!.durationMs).toBe("number");
-    expect(reply[reply.length - 1]!.durationMs).toBeGreaterThanOrEqual(0);
+    expect(typeof result.durationMs).toBe("number");
+    expect(result.durationMs).toBeGreaterThanOrEqual(0);
   });
 
-  it("T1-5: tool_call messages carry startedAt and finishedAt timestamps", async () => {
-    await setupSession("tool-timing-test");
-    const created = await createInputMessage(tmpDir, "tool-timing-test", "test", 1);
+  it("T1-5: tool_send_finished event carries startedAt and finishedAt timestamps", async () => {
+    await setupSession("tool-timing-event-test");
+    const created = await createInputMessage(tmpDir, "tool-timing-event-test", "test", 1);
+    const toolCalls = [{
+      id: "tool-1",
+      messageId: "",
+      toolName: "read",
+      params: { path: "/tmp/f.txt" },
+      result: "ok",
+      metadata: { isError: false },
+    }];
     const deps = mockDeps({
-      runWithSdk: async () => ({
-        runId: "test",
-        model: { provider: "test", modelId: "test", displayName: "Test", reasoning: false, input: [], available: true },
-        tools: ["read"],
-        prompt: "test",
-        reasoningText: "...",
-        replyText: "done.",
-        toolCalls: [{
-          id: "tool-1",
-          messageId: "",
-          toolName: "read",
-          params: { path: "/tmp/f.txt" },
-          result: "ok",
-          metadata: { isError: false },
-        }],
-      }),
+      runWithSdk: async (opts) => {
+        for (const tc of toolCalls) {
+          await opts.onEvent?.({
+            type: "tool_call_started",
+            payload: { toolCallId: tc.id, toolName: tc.toolName, args: tc.params } as any,
+          });
+          await opts.onEvent?.({
+            type: "tool_call_finished",
+            payload: { toolCallId: tc.id, toolName: tc.toolName, result: tc.result, isError: tc.metadata?.isError ?? false } as any,
+          });
+        }
+        return {
+          runId: "test",
+          model: { provider: "test", modelId: "test", displayName: "Test", reasoning: false, input: [], available: true },
+          tools: ["read"],
+          prompt: "test",
+          reasoningText: "...",
+          replyText: "done.",
+          toolCalls,
+        };
+      },
     });
 
-    await executeSessionTask(tmpDir, "tool-timing-test", {
+    await executeSessionTask(tmpDir, "tool-timing-event-test", {
       turnId: 1,
       inputText: "test",
       inputId: created.inputMessage.id,
       ...(created.parentId !== undefined ? { parentId: created.parentId } : {}),
     }, mockCtx, deps);
 
-    const messages = await readMessages(tmpDir, "tool-timing-test");
-    const toolCalls = messages.filter(m => m.kind === "tool_call");
-    expect(toolCalls.length).toBe(1);
-    expect(typeof toolCalls[0]!.finishedAt).toBe("string");
-    // startedAt is captured from tool_call_started event, so it's set when onEvent fires
-    // in mock test, onEvent is called but toolStartedAt is tracked via sdkToMessageId
-  });
-
-  // ── T1-7: 可配置超时 ───────────────────────────────────────────────────
-
-  it("T1-7: passes timeoutMs to runWithSdk when specified in request", async () => {
-    await setupSession("timeout-req-test");
-    const created = await createInputMessage(tmpDir, "timeout-req-test", "test", 1);
-
-    let receivedTimeoutMs: number | undefined;
-    const deps = mockDeps({
-      runWithSdk: async (opts) => {
-        receivedTimeoutMs = (opts as any).timeoutMs;
-        return {
-          runId: "test",
-          model: { provider: "test", modelId: "test", displayName: "Test", reasoning: false, input: [], available: true },
-          tools: [],
-          prompt: "test",
-          reasoningText: "...",
-          replyText: "done.",
-          toolCalls: [],
-        };
-      },
-    });
-
-    await executeSessionTask(tmpDir, "timeout-req-test", {
-      turnId: 1,
-      inputText: "test",
-      inputId: created.inputMessage.id,
-      timeoutMs: 5000,
-    }, mockCtx, deps);
-
-    expect(receivedTimeoutMs).toBe(5000);
-  });
-
-  it("T1-7: resolves timeout from config.defaultTimeoutMs when request has none", async () => {
-    const promptPath = join(tmpDir, "prompt-timeout-default.md");
-    writeFileSync(promptPath, "timeout default", "utf-8");
-    await createSession(tmpDir, {
-      sessionId: "timeout-default-test",
-      systemPromptFilePaths: [promptPath],
-      sdkMode: "host-inherit",
-    });
-    await updateSessionConfig(tmpDir, "timeout-default-test", { defaultTimeoutMs: 90000 });
-
-    const created = await createInputMessage(tmpDir, "timeout-default-test", "test", 1);
-
-    let receivedTimeoutMs: number | undefined;
-    const deps = mockDeps({
-      runWithSdk: async (opts) => {
-        receivedTimeoutMs = (opts as any).timeoutMs;
-        return {
-          runId: "test",
-          model: { provider: "test", modelId: "test", displayName: "Test", reasoning: false, input: [], available: true },
-          tools: [],
-          prompt: "test",
-          reasoningText: "...",
-          replyText: "done.",
-          toolCalls: [],
-        };
-      },
-    });
-
-    await executeSessionTask(tmpDir, "timeout-default-test", {
-      turnId: 1,
-      inputText: "test",
-      inputId: created.inputMessage.id,
-    }, mockCtx, deps);
-
-    expect(receivedTimeoutMs).toBe(90000);
-  });
-
-  it("T1-7: request-level timeoutMs takes precedence over config", async () => {
-    const promptPath = join(tmpDir, "prompt-timeout-override.md");
-    writeFileSync(promptPath, "timeout override", "utf-8");
-    await createSession(tmpDir, {
-      sessionId: "timeout-override-test",
-      systemPromptFilePaths: [promptPath],
-      sdkMode: "host-inherit",
-    });
-    await updateSessionConfig(tmpDir, "timeout-override-test", { defaultTimeoutMs: 120000 });
-
-    const created = await createInputMessage(tmpDir, "timeout-override-test", "test", 1);
-
-    let receivedTimeoutMs: number | undefined;
-    const deps = mockDeps({
-      runWithSdk: async (opts) => {
-        receivedTimeoutMs = (opts as any).timeoutMs;
-        return {
-          runId: "test",
-          model: { provider: "test", modelId: "test", displayName: "Test", reasoning: false, input: [], available: true },
-          tools: [],
-          prompt: "test",
-          reasoningText: "...",
-          replyText: "done.",
-          toolCalls: [],
-        };
-      },
-    });
-
-    await executeSessionTask(tmpDir, "timeout-override-test", {
-      turnId: 1,
-      inputText: "test",
-      inputId: created.inputMessage.id,
-      timeoutMs: 30000, // request-level takes precedence
-    }, mockCtx, deps);
-
-    expect(receivedTimeoutMs).toBe(30000);
+    const events = await readEvents(tmpDir, "tool-timing-event-test");
+    const finishedEvent = events.find(e => e.type === "tool_send_finished");
+    expect(finishedEvent).toBeDefined();
+    expect(typeof finishedEvent!.payload.finishedAt).toBe("string");
   });
 });

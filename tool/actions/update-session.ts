@@ -12,7 +12,6 @@ export interface UpdateSessionParams {
   sessionId: string;
   systemPromptFilePaths?: string[];
   sdkMode?: SessionSdkMode;
-  defaultTimeoutMs?: number;
   modelSelection?: SubagentModelSelection;
   tools?: SubagentToolSelection;
   sdkOptions?: StandaloneSdkOptions;
@@ -26,7 +25,6 @@ export async function handleUpdateSession(
     const session = await updateSessionConfig(ctx.cwd, params.sessionId, {
       ...(params.systemPromptFilePaths ? { systemPromptFilePaths: params.systemPromptFilePaths } : {}),
       ...(params.sdkMode ? { sdkMode: params.sdkMode } : {}),
-      ...(params.defaultTimeoutMs !== undefined ? { defaultTimeoutMs: params.defaultTimeoutMs } : {}),
       ...(params.modelSelection ? { modelSelection: params.modelSelection } : {}),
       ...(params.tools ? { tools: params.tools } : {}),
       ...(params.sdkOptions ? { sdkOptions: params.sdkOptions } : {}),

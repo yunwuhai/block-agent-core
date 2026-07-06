@@ -100,7 +100,6 @@ export interface PiSdkRunOptions extends SubagentRunRequest {
   settingsManager?: SettingsManager;
   sdkMode?: SessionSdkMode;
   sdkOptions?: StandaloneSdkOptions;
-  timeoutMs?: number;
   onEvent?: (event: { type: string; payload: Record<string, unknown> }) => void | Promise<void>;
 }
 
@@ -272,11 +271,6 @@ export async function runSubagentWithPiSdk(options: PiSdkRunOptions): Promise<Pi
       : promptInput,
   );
 
-  // Timeout support via AbortController
-  const timeoutMs = options.timeoutMs;
-  let abortController: AbortController | undefined;
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-
   const sessionOptions = {
     modelRegistry: runtimeModelRegistry,
     model,
@@ -294,12 +288,6 @@ export async function runSubagentWithPiSdk(options: PiSdkRunOptions): Promise<Pi
     ...(options.settingsManager ? { settingsManager: options.settingsManager } : {}),
   };
 
-  if (timeoutMs && timeoutMs > 0) {
-    abortController = new AbortController();
-    createSessionOpts.signal = abortController.signal;
-    timeoutId = setTimeout(() => abortController!.abort(), timeoutMs);
-  }
-
   const { session } = await createAgentSession(createSessionOpts);
 
   let reasoningText = "";
@@ -316,16 +304,20 @@ export async function runSubagentWithPiSdk(options: PiSdkRunOptions): Promise<Pi
       if (event.assistantMessageEvent.type === "text_delta") {
         replyText += event.assistantMessageEvent.delta;
       }
-      // Capture token usage if available
-      if (typeof event.assistantMessageEvent.inputTokens === "number") {
-        usage = { ...usage, inputTokens: event.assistantMessageEvent.inputTokens };
-      }
-      if (typeof event.assistantMessageEvent.outputTokens === "number") {
-        usage = { ...usage, outputTokens: event.assistantMessageEvent.outputTokens };
+    }
+
+    // Capture token usage from completed message
+    if (event.type === "message_end") {
+      const msg = event.message;
+      if (msg?.usage?.input != null || msg?.usage?.output != null) {
+        usage = {
+          ...(msg.usage.input != null ? { inputTokens: msg.usage.input } : {}),
+          ...(msg.usage.output != null ? { outputTokens: msg.usage.output } : {}),
+        };
       }
     }
 
-    // Capture usage from dedicated usage event if emitted
+    // Capture usage from dedicated usage event if emitted (fallback)
     if (event.type === "usage" || event.type === "token_usage") {
       if (typeof event.inputTokens === "number" || typeof event.outputTokens === "number") {
         usage = {
@@ -371,7 +363,6 @@ export async function runSubagentWithPiSdk(options: PiSdkRunOptions): Promise<Pi
   try {
     await session.prompt(prompt);
   } finally {
-    if (timeoutId) clearTimeout(timeoutId);
     unsubscribe();
     session.dispose();
   }

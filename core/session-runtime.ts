@@ -27,7 +27,6 @@ export interface SessionSendRequest {
   inputId: number;
   parentId?: number;
   temporarySources?: ContextSource[];
-  timeoutMs?: number;
   metadata?: Record<string, unknown>;
 }
 
@@ -38,6 +37,8 @@ export interface SessionTaskExecutionResult {
   prompt: string;
   outputMessageIds: number[];
   activeMessageIds: number[];
+  usage?: PiSdkRunResult["usage"];
+  durationMs: number;
 }
 
 export interface CreatedInputArtifacts {
@@ -148,9 +149,6 @@ export async function executeSessionTask(
     .filter(part => part.trim().length > 0)
     .join("\n\n");
 
-  // Resolve timeout: request-level takes precedence over config-level
-  const timeoutMs = request.timeoutMs ?? config.defaultTimeoutMs;
-
   const sentMessageIds = [...historyContext.activeMessageIds, request.inputId];
   await appendSessionEvent(cwd, sessionId, {
     turnId: request.turnId,
@@ -181,7 +179,6 @@ export async function executeSessionTask(
     ...(config.tools ? { tools: config.tools } : {}),
     sdkMode: config.sdkMode,
     ...(config.sdkOptions ? { sdkOptions: config.sdkOptions } : {}),
-    ...(timeoutMs ? { timeoutMs } : {}),
     onEvent: async (event) => {
       if (event.type === "tool_call_started") {
         const sdkId = event.payload.toolCallId as string;
@@ -209,11 +206,13 @@ export async function executeSessionTask(
   currentParentId = reasoningMessage.id;
 
   const sdkToMessageId = new Map<string, number>();
+  const toolTimingMap = new Map<string, { startedAt: string | undefined; finishedAt: string }>();
 
   for (const trace of result.toolCalls) {
     const isError = Boolean(trace.metadata?.isError);
     const startedAt = toolStartedAt.get(trace.id);
     const finishedAt = new Date().toISOString();
+    toolTimingMap.set(trace.id, { startedAt, finishedAt });
 
     const toolCallMessage = await appendSessionMessage(cwd, sessionId, {
       kind: "tool_call",
@@ -223,8 +222,6 @@ export async function executeSessionTask(
       toolParams: trace.params,
       toolResult: trace.result,
       toolError: isError,
-      ...(startedAt ? { startedAt } : {}),
-      finishedAt,
       ...(trace.metadata ? { metadata: trace.metadata } : {}),
     });
     sdkToMessageId.set(trace.id, toolCallMessage.id);
@@ -248,6 +245,7 @@ export async function executeSessionTask(
   }
   for (const [sdkId, finishedPayload] of pendingFinished) {
     const messageId = sdkToMessageId.get(sdkId);
+    const timing = toolTimingMap.get(sdkId);
     if (messageId !== undefined) {
       await appendSessionEvent(cwd, sessionId, {
         turnId: request.turnId,
@@ -256,6 +254,8 @@ export async function executeSessionTask(
           messageId,
           toolName: finishedPayload.toolName,
           isError: finishedPayload.isError,
+          ...(timing?.startedAt ? { startedAt: timing.startedAt } : {}),
+          finishedAt: timing?.finishedAt ?? new Date().toISOString(),
         },
       });
     }
@@ -266,8 +266,6 @@ export async function executeSessionTask(
     text: result.replyText,
     parentId: currentParentId,
     turnId: request.turnId,
-    ...(result.usage ? { usage: result.usage } : {}),
-    durationMs,
   });
   outputMessageIds.push(replyMessage.id);
 
@@ -280,5 +278,7 @@ export async function executeSessionTask(
     prompt: result.prompt,
     outputMessageIds,
     activeMessageIds,
+    usage: result.usage,
+    durationMs,
   };
 }
