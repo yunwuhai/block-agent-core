@@ -1,5 +1,6 @@
 {
-  "name": "better-subagent",
+  "name": "block-agent-core",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
