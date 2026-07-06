@@ -17,14 +17,6 @@ export default async function (pi: import("@earendil-works/pi-coding-agent").Ext
 export { nowIso } from "./utils/datetime.ts";
 export { toNumberRanges, fromNumberRanges, normalizeRanges } from "./utils/range-utils.ts";
 export { buildChildrenMap, collectDescendantIds, removeIdsAndDescendants } from "./session/message-tree.ts";
-export { appendTurn, getTurn, queryTurns, updateTurn, listTurns, findRecentTurns } from "./turn/turns.ts";
-export { appendToolCall, getToolCall, queryToolCalls, updateToolCall } from "./turn/tool-calls.ts";
-export { appendTemplate, getTemplate, queryTemplates, updateTemplate } from "./turn/templates.ts";
-export { appendFileRef, getFileRef, queryFileRefs, updateFileRef } from "./turn/file-refs.ts";
-export { appendCallRecord, getCallRecord, queryCallRecords, updateCallRecord } from "./turn/call-records.ts";
-export { loadRecipes, getRecipe, addRecipe, updateRecipe } from "./turn/recipes.ts";
-export { buildPrompt, buildPromptFromRecipe } from "./turn/build-prompt.ts";
-export { saveTurn } from "./turn/save-turn.ts";
 export {
   normalizeToolNames,
   PI_BUILTIN_TOOLS,
@@ -88,7 +80,6 @@ export {
   resolvePiModel,
   runSubagentWithPiSdk,
 } from "./adapter/pi-sdk.ts";
-export type * from "./turn/types.ts";
 export type * from "./session/context-sources.ts";
 export type * from "./session/pi-config.ts";
 export type * from "./session/archive-store.ts";
